@@ -2,7 +2,6 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Generic, Literal, NamedTuple, Self, TypeVar
 
 from boto3.dynamodb.conditions import Key
-from pydantic import BaseModel
 
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
 from immaterialdb.errors import QueryNotSupportedError
