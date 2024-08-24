@@ -61,11 +61,11 @@ class ImmaterialDecorators:
 
         return decorator
 
-    def register_model(self, indices: Indices) -> Callable[[Type[Model]], Type[Model]]:
+    def register_model(self, indices: Indices | None = None) -> Callable[[Type[Model]], Type[Model]]:
         def decorator(model_cls: Type[Model]) -> Type[Model]:
-            model_cls.__immaterial_model_config__ = ModelConfig(root_config=self.config, indices=indices)
+            model_cls.__immaterial_model_config__ = ModelConfig(root_config=self.config, indices=indices or [])
             model_cls.__immaterial_root_config__ = self.config
-            self.config.registered_models[model_cls.model_name()] = model_cls
+            self.config.registered_models[model_cls.immaterial_model_name()] = model_cls
             return model_cls
 
         return decorator

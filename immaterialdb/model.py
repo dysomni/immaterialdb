@@ -25,22 +25,18 @@ if TYPE_CHECKING:
 
 
 class UniqueIndex(BaseModel):
-    node_name: Literal["unique_fields"]
+    index_type: Literal["unique"] = "unique"
     unique_fields: list[str]
 
 
 class QueryIndex(BaseModel):
-    node_name: Literal["index_fields"]
+    index_type: Literal["query"] = "query"
     partition_fields: list[str]
     sort_fields: list[str]
 
     @property
     def all_fields(self) -> list[str]:
         return self.partition_fields + self.sort_fields
-
-    @property
-    def gen_pk(self) -> str:
-        return f"index_fields_{self.partition_fields}_{self.sort_fields}"
 
 
 Indices = list[UniqueIndex | QueryIndex]
@@ -89,13 +85,13 @@ class Model(BaseModel):
                 field_values.append(FieldValue(field, getattr(self, field)))
             except AttributeError as e:
                 raise FieldMisconfigurationError(
-                    f"Field {field} is not present in the model {self.model_name()}"
+                    f"Field {field} is not present in the model {self.immaterial_model_name()}"
                 ) from e
 
         return field_values
 
     @classmethod
-    def model_name(cls) -> str:
+    def immaterial_model_name(cls) -> str:
         return cls.__immaterial_model_name__ or cls.__name__
 
     def save(self):
@@ -200,7 +196,7 @@ class Model(BaseModel):
     @classmethod
     def _map_query_fields_to_index(cls, standard_query: StandardQuery) -> QueryIndex | None:
         for index in cls.__immaterial_model_config__.indices:
-            if not index.node_name == "index_fields":
+            if not index.index_type == "query":
                 continue
 
             if len(standard_query.all_fields) > len(index.all_fields):
@@ -226,20 +222,20 @@ def materialize_model(model: Model) -> NodeTypeList:
     nodes: NodeTypeList = []
 
     for index in model.__immaterial_model_config__.indices:
-        if index.node_name == "unique_fields":
+        if index.index_type == "unique":
             field_values = model.fetch_field_values(index.unique_fields)
             unique_node = UniqueNode.create(
-                model_name=model.model_name(),
+                entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
                 fields=field_values,
             )
             nodes.append(unique_node)
 
-        elif index.node_name == "index_fields":
+        elif index.index_type == "query":
             partition_field_values = model.fetch_field_values(index.partition_fields)
             sort_field_values = model.fetch_field_values(index.sort_fields)
             index_node = QueryNode.create(
-                model_name=model.model_name(),
+                entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
                 partition_fields=partition_field_values,
                 sort_fields=sort_field_values,
@@ -250,7 +246,7 @@ def materialize_model(model: Model) -> NodeTypeList:
 
     nodes.append(
         BaseNode(
-            model_name=model.model_name(),
+            entity_name=model.immaterial_model_name(),
             entity_id=model.id,
             raw_data=model.model_dump_json(),
             pk=model.id,

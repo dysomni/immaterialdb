@@ -77,3 +77,19 @@ class DynamodbConnectionProvider:
                     LOGGER.warning(f"Failed to release lock for {id}, someone else has already taken it")
                 else:
                     raise
+
+    def create_table(self):
+        table = self.resource.create_table(
+            TableName=self.table_name,
+            KeySchema=[
+                {"AttributeName": "pk", "KeyType": "HASH"},
+                {"AttributeName": "sk", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "pk", "AttributeType": "S"},
+                {"AttributeName": "sk", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+        table.meta.client.get_waiter("table_exists").wait(TableName=self.table_name)
+        LOGGER.info(f"Table {self.table_name} created")

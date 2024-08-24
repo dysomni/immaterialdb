@@ -147,7 +147,9 @@ class Querier(Generic[T]):
             for statement in self.given_query.statements[len(index.partition_fields) :]
         ]
 
-        pk = serialize_for_query_node_partition_key(self.model_cls.model_name(), pk_fields, index.sort_fields)
+        pk = serialize_for_query_node_partition_key(
+            self.model_cls.immaterial_model_name(), pk_fields, index.sort_fields
+        )
         sk = serialize_for_query_node_partial_sort_key(sk_fields)
 
         result = self.dynamodb_provider.table.query(

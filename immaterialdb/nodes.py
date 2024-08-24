@@ -2,8 +2,8 @@ from abc import ABC, abstractmethod
 from enum import StrEnum, auto
 from typing import Any, Literal, NamedTuple, Self
 
-from boto3.dynamodb.types import TypeDeserializer, TypeSerializer, _AttributeValueTypeDef
-from mypy_boto3_dynamodb.type_defs import TransactWriteItemTypeDef
+from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
+from mypy_boto3_dynamodb.type_defs import AttributeValueTypeDef, TransactWriteItemTypeDef
 from pydantic import BaseModel
 
 from immaterialdb.types import FieldValue, PrimaryKeys
@@ -18,7 +18,7 @@ class NodeTypes(StrEnum):
 
 class Node(BaseModel, ABC):
     node_type: NodeTypes
-    model_name: str
+    entity_name: str
     entity_id: str
     pk: str
     sk: str
@@ -41,11 +41,11 @@ class Node(BaseModel, ABC):
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
         pass
 
-    def for_dynamo(self) -> dict[str, _AttributeValueTypeDef]:
+    def for_dynamo(self) -> dict[str, AttributeValueTypeDef]:
         return {k: TypeSerializer().serialize(v) for k, v in self.model_dump().items()}
 
     @classmethod
-    def from_dynamo(cls, dynamo_item: dict[str, _AttributeValueTypeDef]) -> Self:
+    def from_dynamo(cls, dynamo_item: dict[str, AttributeValueTypeDef]) -> Self:
         return cls(**{k: TypeDeserializer().deserialize(v) for k, v in dynamo_item.items()})
 
 
@@ -70,9 +70,9 @@ class UniqueNode(Node):
     fields: list[FieldValue]
 
     @classmethod
-    def create(cls, model_name: str, entity_id: str, fields: list[FieldValue]) -> Self:
-        pk, sk = serialize_for_unique_node_primary_key(model_name, entity_id, fields)
-        return cls(model_name=model_name, entity_id=entity_id, fields=fields, pk=pk, sk=sk)
+    def create(cls, entity_name: str, entity_id: str, fields: list[FieldValue]) -> Self:
+        pk, sk = serialize_for_unique_node_primary_key(entity_name, entity_id, fields)
+        return cls(entity_name=entity_name, entity_id=entity_id, fields=fields, pk=pk, sk=sk)
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
         return {
@@ -93,11 +93,11 @@ class QueryNode(Node):
 
     @classmethod
     def create(
-        cls, model_name: str, entity_id: str, partition_fields: list[FieldValue], sort_fields: list[FieldValue]
+        cls, entity_name: str, entity_id: str, partition_fields: list[FieldValue], sort_fields: list[FieldValue]
     ) -> Self:
-        pk, sk = serialize_for_query_node_primary_key(model_name, entity_id, partition_fields, sort_fields)
+        pk, sk = serialize_for_query_node_primary_key(entity_name, entity_id, partition_fields, sort_fields)
         return cls(
-            model_name=model_name,
+            entity_name=entity_name,
             entity_id=entity_id,
             partition_fields=partition_fields,
             sort_fields=sort_fields,

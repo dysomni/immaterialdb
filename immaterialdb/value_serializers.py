@@ -15,19 +15,19 @@ FLOAT_FRAC_MAX_LENGTH = 10
 
 
 def serialize_for_query_node_primary_key(
-    model_name: str, entity_id: str, pk_fields: list[FieldValue], sk_fields: list[FieldValue]
+    entity_name: str, entity_id: str, pk_fields: list[FieldValue], sk_fields: list[FieldValue]
 ) -> PrimaryKey:
-    pk = serialize_for_query_node_partition_key(model_name, pk_fields, [field.name for field in sk_fields])
+    pk = serialize_for_query_node_partition_key(entity_name, pk_fields, [field.name for field in sk_fields])
     sort_field_values = serialize_for_query_node_partial_sort_key(sk_fields)
     sk = f"{sort_field_values}{SEPERATOR}{entity_id}"
     return PrimaryKey(pk, sk)
 
 
 def serialize_for_query_node_partition_key(
-    model_name: str, pk_fields: list[FieldValue], sort_field_names: list[str]
+    entity_name: str, pk_fields: list[FieldValue], sort_field_names: list[str]
 ) -> str:
     key_value_pairs = ",".join([f"{field.name}={serialize_for_index(field.value)}" for field in pk_fields])
-    pk = f"{model_name}[{key_value_pairs}][{','.join(sort_field_names)}]"
+    pk = f"{entity_name}[{key_value_pairs}][{','.join(sort_field_names)}]"
     return pk
 
 
@@ -39,10 +39,10 @@ def serialize_for_query_node_partial_sort_key(sk_fields: list[FieldValue]) -> st
 
 
 def serialize_for_unique_node_primary_key(
-    model_name: str, entity_id: str, unique_fields: list[FieldValue]
+    entity_name: str, entity_id: str, unique_fields: list[FieldValue]
 ) -> PrimaryKey:
     key_value_pairs = ",".join([f"{field.name}={serialize_for_index(field.value)}" for field in unique_fields])
-    pk = f"{model_name}({key_value_pairs})"
+    pk = f"{entity_name}({key_value_pairs})"
     sk = entity_id
     return PrimaryKey(pk, sk)
 
