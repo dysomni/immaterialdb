@@ -17,7 +17,7 @@ from immaterialdb.nodes import (
     QueryNode,
     UniqueNode,
 )
-from immaterialdb.query import Querier, Query, QueryResult, QueryTypes, StandardQuery
+from immaterialdb.query import Querier, QueryResult, QueryTypes, StandardQuery
 from immaterialdb.types import FieldValue, PrimaryKey
 
 if TYPE_CHECKING:
