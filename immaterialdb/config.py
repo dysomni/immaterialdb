@@ -1,7 +1,8 @@
 from typing import Callable, Protocol, Type, TypeVar
 
+from immaterialdb.constants import SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
-from immaterialdb.model import Indices, Model, ModelConfig
+from immaterialdb.model import Indices, Model, ModelConfig, UniqueIndex
 
 
 class RootConfig:
@@ -74,21 +75,19 @@ class ImmaterialDecorators:
         return decorator
 
 
-# IMMATERIAL = RootConfig("my_table")
+# for a later day - the ability for immaterialdb to manage its own internal models for keeping track of usage
+# INTERNAL_MODEL_PREFIX = "immaterial_internal_"
+# INTERNAL_MODEL_RECORD_NAME = INTERNAL_MODEL_PREFIX + "entity_types"
 
 
-# @IMMATERIAL.decorators.register_encryption
-# def encrypt_string(text: str) -> str:
-#     return text[::-1]
+# def create_internal_models(root_config: RootConfig):
+#     @root_config.decorators.register_model()
+#     class ImmaterialInternalModelRecord(Model):
+#         __immaterial_model_name__ = INTERNAL_MODEL_RECORD_NAME
+#         entity_name: str
+#         entity_schema: dict
+#         indicies: Indices
 
-
-# @IMMATERIAL.decorators.register_decryption
-# def decrypt_string(text: str) -> str:
-#     return text[::-1]
-
-
-# @IMMATERIAL.decorators.register_model([])
-# class User(Model):
-#     username: str
-#     email: str
-#     password: str
+#         @classmethod
+#         def gen_id(cls, entity_name: str) -> str:
+#             return f"{cls.immaterial_model_name()}{SEPERATOR}{entity_name}"

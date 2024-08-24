@@ -19,7 +19,7 @@ from immaterialdb.nodes import (
     UniqueNode,
 )
 from immaterialdb.query import BatchQueryResult, Querier, QueryTypes, StandardQuery
-from immaterialdb.types import FieldValue, PrimaryKey
+from immaterialdb.types import FieldValue, LastEvaluatedKey, PrimaryKey
 
 if TYPE_CHECKING:
     from immaterialdb.config import RootConfig
@@ -125,12 +125,19 @@ class Model(BaseModel):
 
     @classmethod
     def query(
-        cls, query: QueryTypes, descending: bool = False, max_records: int | None = None, lazy: bool = True
+        cls,
+        query: QueryTypes,
+        descending: bool = False,
+        max_records: int | None = None,
+        lazy: bool = True,
+        last_evaluated_key: LastEvaluatedKey | None = None,
     ) -> BatchQueryResult[Self]:
         querier = Querier(
             cls, query, cls.__immaterial_root_config__.dynamodb_provider, scan_index_forward=not descending
         )
-        return BatchQueryResult(querier=querier, lazy=lazy, max_records=max_records)
+        return BatchQueryResult(
+            querier=querier, lazy=lazy, max_records=max_records, last_evaluated_key=last_evaluated_key
+        )
 
     def delete(self):
         self.delete_by_id(self.id)

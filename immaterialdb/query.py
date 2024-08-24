@@ -62,10 +62,16 @@ class BatchQueryResult(Generic[T]):
     _current_batch_index: int
     _max_records: int | None
 
-    def __init__(self, querier: "Querier[T]", lazy: bool = True, max_records: int | None = None):
+    def __init__(
+        self,
+        querier: "Querier[T]",
+        lazy: bool = True,
+        max_records: int | None = None,
+        last_evaluated_key: LastEvaluatedKey | None = None,
+    ):
         self._batches = []
         self._current_batch_index = 0
-        self.last_evaluated_key = None
+        self.last_evaluated_key = last_evaluated_key
         self._flattened_records = []
         self.more_to_query = True
         self.querier = querier

@@ -45,12 +45,13 @@ class DynamodbConnectionProvider:
         end_time = start_time + timedelta(seconds=wait)
         expiration_time = now + timedelta(seconds=ttl)
         lock_value = ulid.new().str
+        pk = f"immaterial_lock#{id}"
 
         while now <= end_time:
             try:
                 LOGGER.debug(f"Attempting to acquire lock for {id}")
                 self.table.put_item(
-                    Item={"pk": id, "sk": lock_value, "expire_time": expiration_time.isoformat()},
+                    Item={"pk": pk, "sk": lock_value, "expire_time": expiration_time.isoformat()},
                     ConditionExpression="attribute_not_exists(pk) OR expire_time < :now",
                     ExpressionAttributeValues={":now": now.isoformat()},
                 )
@@ -72,10 +73,32 @@ class DynamodbConnectionProvider:
         finally:
             try:
                 # Release the lock
-                self.table.delete_item(Key={"pk": id, "sk": lock_value})
+                self.table.delete_item(Key={"pk": pk, "sk": lock_value})
                 LOGGER.debug(f"Lock released for {id}")
             except ClientError as e:
                 LOGGER.warning(f"Failed to release lock for {id}, {e}")
+
+    def init_counter(self, id: str):
+        pk = sk = f"immaterial_counter#{id}"
+        with self.lock(id):
+            try:
+                self.table.put_item(
+                    Item={"pk": pk, "sk": sk, "count": 0}, ConditionExpression="attribute_not_exists(pk)"
+                )
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                    LOGGER.info(f"Counter {id} already exists")
+                else:
+                    raise
+
+    def increment_counter(self, id: str, amount: int = 1):
+        pk = sk = f"immaterial_counter#{id}"
+        self.table.update_item(
+            Key={"pk": pk, "sk": sk},
+            UpdateExpression="ADD #count :amount",
+            ExpressionAttributeNames={"#count": "count"},
+            ExpressionAttributeValues={":amount": amount},
+        )
 
     def create_table(self):
         table = self.resource.create_table(
