@@ -2,10 +2,11 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Generic, Literal, NamedTuple, Self, TypeVar
 
 from boto3.dynamodb.conditions import Key
+from mypy_boto3_dynamodb.type_defs import ConditionBaseImportTypeDef
 
-from immaterialdb.dynamo_provider import DynamodbConnectionProvider
+from immaterialdb.dynamo_provider import DynamodbConnectionProvider, GsiNames
 from immaterialdb.errors import QueryNotSupportedError
-from immaterialdb.nodes import QueryNode
+from immaterialdb.nodes import BaseNode, QueryNode
 from immaterialdb.types import FieldValue, LastEvaluatedKey
 from immaterialdb.value_serializers import (
     serialize_for_query_node_partial_sort_key,
@@ -76,6 +77,7 @@ class BatchQueryResult(Generic[T]):
             self._current_batch_index = 0  # reset the iterator
 
     def __iter__(self) -> Self:
+        self._current_batch_index = 0
         return self
 
     def __next__(self) -> list[T]:
@@ -83,15 +85,21 @@ class BatchQueryResult(Generic[T]):
             if not self.more_to_query or self.reached_max_records:
                 raise StopIteration
 
-            result = self.querier.query(self.last_evaluated_key, self.next_limit)
-            self._batches.append(result.records)
-            self._flattened_records.extend(result.records)
-            self.last_evaluated_key = result.last_evaluated_key
-            self.more_to_query = result.more_to_query
+            self.make_query()
 
         batch = self._batches[self._current_batch_index]
         self._current_batch_index += 1
         return batch
+
+    def make_query(self) -> None:
+        if not self.more_to_query:
+            return
+
+        result = self.querier.query(self.last_evaluated_key, self.next_limit)
+        self._batches.append(result.records)
+        self._flattened_records.extend(result.records)
+        self.last_evaluated_key = result.last_evaluated_key
+        self.more_to_query = result.more_to_query
 
     @property
     def reached_max_records(self) -> bool:
@@ -132,7 +140,6 @@ class Querier(Generic[T]):
     given_query: "QueryTypes"
     dynamodb_provider: DynamodbConnectionProvider
     scan_index_forward: bool
-    consistent_read: bool
 
     def __init__(
         self,
@@ -140,29 +147,65 @@ class Querier(Generic[T]):
         query: "QueryTypes",
         dynamodb_provider: DynamodbConnectionProvider,
         scan_index_forward: bool = True,
-        consistent_read: bool = True,
     ):
         self.model_cls = model_cls
         self.given_query = query
         self.dynamodb_provider = dynamodb_provider
         self.scan_index_forward = scan_index_forward
-        self.consistent_read = consistent_read
 
     def query(self, last_evaluated_key: LastEvaluatedKey | None = None, limit: int = 50) -> QueryActionResult[T]:
-        if not all(map(lambda statement: statement.operation == "eq", self.given_query.statements)):
+        extra = {"ConsistentRead": True}
+        if isinstance(self.given_query, StandardQuery):
+            key_condition = self.standard_query_to_key_condition(self.given_query)
+            extra["ConsistentRead"] = self.given_query.consistent_read
+            node_type_cls = QueryNode
+        elif isinstance(self.given_query, KeyConditionQuery):
+            key_condition = self.given_query.key_condition
+            extra["ConsistentRead"] = self.given_query.consistent_read
+            if self.given_query.gsi_name:
+                extra["IndexName"] = self.given_query.gsi_name
+            node_type_cls = QueryNode
+        elif isinstance(self.given_query, AllQuery):
+            key_condition = Key("entity_name").eq(self.model_cls.immaterial_model_name())
+            extra["IndexName"] = GsiNames.model_scan
+            extra["ConsistentRead"] = False
+            node_type_cls = BaseNode
+        else:
+            raise QueryNotSupportedError(f"Query type {type(self.given_query)} is not supported.")
+
+        if last_evaluated_key:
+            extra["ExclusiveStartKey"] = last_evaluated_key
+
+        result = self.dynamodb_provider.table.query(
+            KeyConditionExpression=key_condition,
+            ScanIndexForward=self.scan_index_forward,
+            Limit=limit,
+            **extra,
+        )
+
+        query_nodes = [node_type_cls.model_validate(item) for item in result.get("Items", [])]
+        records = [self.model_cls.model_validate_json(node.raw_data) for node in query_nodes]
+
+        last_evaluated_key = result["LastEvaluatedKey"] if "LastEvaluatedKey" in result else None
+        more_to_query = "LastEvaluatedKey" in result
+
+        return QueryActionResult(records, last_evaluated_key, more_to_query)
+
+    def standard_query_to_key_condition(self, standard_query: "StandardQuery") -> ConditionBaseImportTypeDef:
+        if not all(map(lambda statement: statement.operation == "eq", standard_query.statements)):
             raise QueryNotSupportedError("Only 'eq' operations are supported in queries.")
 
-        index = self.model_cls._map_query_fields_to_index(self.given_query)
+        index = self.model_cls._map_query_fields_to_index(standard_query)
         if not index:
             raise QueryNotSupportedError("No index found for the given query fields.")
 
         pk_fields = [
             FieldValue(name=statement.field, value=statement.value)
-            for statement in self.given_query.statements[: len(index.partition_fields)]
+            for statement in standard_query.statements[: len(index.partition_fields)]
         ]
         sk_fields = [
             FieldValue(name=statement.field, value=statement.value)
-            for statement in self.given_query.statements[len(index.partition_fields) :]
+            for statement in standard_query.statements[len(index.partition_fields) :]
         ]
 
         pk = serialize_for_query_node_partition_key(
@@ -170,24 +213,7 @@ class Querier(Generic[T]):
         )
         sk = serialize_for_query_node_partial_sort_key(sk_fields)
 
-        extra = {}
-        if last_evaluated_key:
-            extra["ExclusiveStartKey"] = last_evaluated_key
-        result = self.dynamodb_provider.table.query(
-            KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(sk),
-            ConsistentRead=self.consistent_read,
-            ScanIndexForward=self.scan_index_forward,
-            Limit=limit,
-            **extra,
-        )
-
-        query_nodes = [QueryNode.model_validate(item) for item in result.get("Items", [])]
-        records = [self.model_cls.model_validate_json(node.raw_data) for node in query_nodes]
-
-        last_evaluated_key = result["LastEvaluatedKey"] if "LastEvaluatedKey" in result else None
-        more_to_query = "LastEvaluatedKey" in result
-
-        return QueryActionResult(records, last_evaluated_key, more_to_query)
+        return Key("pk").eq(pk) & Key("sk").begins_with(sk)
 
 
 StandardQueryStatement = NamedTuple(
@@ -196,14 +222,33 @@ StandardQueryStatement = NamedTuple(
 
 
 class StandardQuery:
-    def __init__(self, statements: list[StandardQueryStatement]):
-        self.statements = statements
-
     statements: list[StandardQueryStatement]
+    consistent_read: bool
+
+    def __init__(self, statements: list[StandardQueryStatement], consistent_read: bool = True):
+        self.statements = statements
+        self.consistent_read = consistent_read
 
     @cached_property
     def all_fields(self) -> list[str]:
         return [statement.field for statement in self.statements]
 
 
-QueryTypes = StandardQuery
+class KeyConditionQuery:
+    key_condition: ConditionBaseImportTypeDef
+    consistent_read: bool
+    gsi_name: str | None
+
+    def __init__(
+        self, key_condition: ConditionBaseImportTypeDef, consistent_read: bool = True, gsi_name: str | None = None
+    ):
+        self.key_condition = key_condition
+        self.consistent_read = consistent_read
+        self.gsi_name = gsi_name
+
+
+class AllQuery:
+    pass
+
+
+QueryTypes = StandardQuery | KeyConditionQuery | AllQuery

@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum, auto
 from functools import cached_property
 from time import sleep
 
@@ -11,6 +12,11 @@ from mypy_boto3_dynamodb.client import DynamoDBClient
 from mypy_boto3_dynamodb.service_resource import Table
 
 from immaterialdb.constants import LOGGER
+
+
+class GsiNames(StrEnum):
+    ids_only = auto()
+    model_scan = auto()
 
 
 class DynamodbConnectionProvider:
@@ -80,17 +86,27 @@ class DynamodbConnectionProvider:
             ],
             GlobalSecondaryIndexes=[
                 {
-                    "IndexName": "ids_only",
+                    "IndexName": GsiNames.ids_only,
                     "KeySchema": [
                         {"AttributeName": "entity_id", "KeyType": "HASH"},
                     ],
                     "Projection": {"ProjectionType": "ALL"},
-                }
+                },
+                {
+                    "IndexName": GsiNames.model_scan,
+                    "KeySchema": [
+                        {"AttributeName": "entity_name", "KeyType": "HASH"},
+                        {"AttributeName": "base_node_id", "KeyType": "RANGE"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                },
             ],
             AttributeDefinitions=[
                 {"AttributeName": "pk", "AttributeType": "S"},
                 {"AttributeName": "sk", "AttributeType": "S"},
                 {"AttributeName": "entity_id", "AttributeType": "S"},
+                {"AttributeName": "entity_name", "AttributeType": "S"},
+                {"AttributeName": "base_node_id", "AttributeType": "S"},
             ],
             BillingMode="PAY_PER_REQUEST",
         )

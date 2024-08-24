@@ -51,7 +51,7 @@ class Node(BaseModel, ABC):
 
 class BaseNode(Node):
     node_type: Literal[NodeTypes.base] = NodeTypes.base
-    base_node: Literal[NodeTypes.base] = NodeTypes.base
+    base_node_id: str
     raw_data: str
     other_nodes: PrimaryKeys
 
@@ -66,13 +66,13 @@ class BaseNode(Node):
 
 class UniqueNode(Node):
     node_type: Literal[NodeTypes.unique] = NodeTypes.unique
-    unique_node: Literal[NodeTypes.unique] = NodeTypes.unique
+    unique_node_id: str
     fields: list[FieldValue]
 
     @classmethod
     def create(cls, entity_name: str, entity_id: str, fields: list[FieldValue]) -> Self:
         pk, sk = serialize_for_unique_node_primary_key(entity_name, fields)
-        return cls(entity_name=entity_name, entity_id=entity_id, fields=fields, pk=pk, sk=sk)
+        return cls(entity_name=entity_name, entity_id=entity_id, fields=fields, pk=pk, sk=sk, unique_node_id=entity_id)
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
         return {
@@ -87,7 +87,7 @@ class UniqueNode(Node):
 
 class QueryNode(Node):
     node_type: Literal[NodeTypes.query] = NodeTypes.query
-    query_node: Literal[NodeTypes.query] = NodeTypes.query
+    query_node_id: str
     partition_fields: list[FieldValue]
     sort_fields: list[FieldValue]
     raw_data: str
@@ -110,6 +110,7 @@ class QueryNode(Node):
             pk=pk,
             sk=sk,
             raw_data=raw_data,
+            query_node_id=entity_id,
         )
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:

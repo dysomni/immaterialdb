@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from immaterialdb.config import RootConfig
 from immaterialdb.errors import RecordNotUniqueError
 from immaterialdb.model import Model, QueryIndex, UniqueIndex, materialize_model
-from immaterialdb.query import StandardQuery, StandardQueryStatement
+from immaterialdb.query import AllQuery, StandardQuery, StandardQueryStatement
 from immaterialdb.testing import mock_immaterialdb
 
 IMMATERIALDB = RootConfig("test_table")
@@ -85,11 +85,17 @@ def test_model_query():
     new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
     new_model.save()
 
-    response = MyModel.query(StandardQuery(statements=[StandardQueryStatement("name", "eq", "John")]), lazy=False)
-    assert len(response._batches) == 1
-    assert len(response._batches[0]) == 1
+    response = MyModel.query(StandardQuery(statements=[StandardQueryStatement("name", "eq", "John")]))
     assert response.records[0] == new_model
-    assert response.next_batch()[0] == new_model
+
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_query_all():
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model.save()
+
+    response = MyModel.query(AllQuery())
+    assert response.records[0] == new_model
 
 
 @mock_immaterialdb(IMMATERIALDB)

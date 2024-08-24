@@ -250,6 +250,7 @@ def materialize_model(model: Model) -> NodeTypeList:
         BaseNode(
             entity_name=model.immaterial_model_name(),
             entity_id=model.id,
+            base_node_id=model.id,
             raw_data=model.model_dump_json(),
             pk=model.id,
             sk=model.id,
