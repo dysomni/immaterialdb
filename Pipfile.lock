@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "1f16d9a5e8912c83b21263dbf14c99c14341978c1392f3cea15437439449f0db"
+            "sha256": "11ff4cae47bde8b1238a52ffd96b073570aecf9f0ae1f3146bc4473f6544f51d"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -668,12 +668,12 @@
         },
         "moto": {
             "hashes": [
-                "sha256:6d242dbbabe925bb385ddb6958449e5c827670b13b8e153ed63f91dbdb50372c",
-                "sha256:8f9263ca70b646f091edcc93e97cda864a542e6d16ed04066b1370ed217bd190"
+                "sha256:984377a9c4536543fc09f49a1d5210c61c4a4f55c79719f7d9f8dcdd9bf55ea5",
+                "sha256:ddf8864f0d61af88fd07a4e5eac428c6bebf4fcd10023f8e756e65e9e7b7e4a5"
             ],
             "index": "pypi",
-            "markers": "python_version >= '3.7'",
-            "version": "==4.2.14"
+            "markers": "python_version >= '3.8'",
+            "version": "==5.0.13"
         },
         "mypy-boto3-dynamodb": {
             "hashes": [

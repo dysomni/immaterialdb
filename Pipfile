@@ -9,7 +9,7 @@ boto3 = "*"
 ulid-py = "*"
 
 [dev-packages]
-moto = "<5"
+moto = "*"
 pytest = "*"
 ipykernel = "*"
 ipython = "*"

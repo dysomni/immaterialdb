@@ -85,6 +85,7 @@ class BatchQueryResult(Generic[T]):
 
             result = self.querier.query(self.last_evaluated_key, self.next_limit)
             self._batches.append(result.records)
+            self._flattened_records.extend(result.records)
             self.last_evaluated_key = result.last_evaluated_key
             self.more_to_query = result.more_to_query
 
@@ -169,12 +170,15 @@ class Querier(Generic[T]):
         )
         sk = serialize_for_query_node_partial_sort_key(sk_fields)
 
+        extra = {}
+        if last_evaluated_key:
+            extra["ExclusiveStartKey"] = last_evaluated_key
         result = self.dynamodb_provider.table.query(
             KeyConditionExpression=Key("pk").eq(pk) & Key("sk").begins_with(sk),
             ConsistentRead=self.consistent_read,
-            ExclusiveStartKey=last_evaluated_key if last_evaluated_key else {},
             ScanIndexForward=self.scan_index_forward,
             Limit=limit,
+            **extra,
         )
 
         query_nodes = [QueryNode.model_validate(item) for item in result.get("Items", [])]

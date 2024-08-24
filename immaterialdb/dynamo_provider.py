@@ -78,9 +78,19 @@ class DynamodbConnectionProvider:
                 {"AttributeName": "pk", "KeyType": "HASH"},
                 {"AttributeName": "sk", "KeyType": "RANGE"},
             ],
+            GlobalSecondaryIndexes=[
+                {
+                    "IndexName": "ids_only",
+                    "KeySchema": [
+                        {"AttributeName": "entity_id", "KeyType": "HASH"},
+                    ],
+                    "Projection": {"ProjectionType": "ALL"},
+                }
+            ],
             AttributeDefinitions=[
                 {"AttributeName": "pk", "AttributeType": "S"},
                 {"AttributeName": "sk", "AttributeType": "S"},
+                {"AttributeName": "entity_id", "AttributeType": "S"},
             ],
             BillingMode="PAY_PER_REQUEST",
         )

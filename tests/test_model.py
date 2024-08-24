@@ -23,10 +23,12 @@ class MyModel(Model):
     money: Decimal
 
 
-@mock_immaterialdb(IMMATERIALDB)
 def test_adding_model():
     assert MyModel.immaterial_model_name() in IMMATERIALDB.registered_models
 
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_save_and_get():
     new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
     new_model.save()
 
@@ -41,29 +43,61 @@ def test_adding_model():
     assert response["Items"][1] in expected_nodes
     assert response["Items"][2] in expected_nodes
 
-    gotten_model.name = "Jane"
-    gotten_model.save()
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_update():
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model.save()
+
+    updated_model = new_model.copy()
+    updated_model.age = 31
+    updated_model.save()
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
-    expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(gotten_model)]
+    expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(updated_model)]
     assert response["Count"] == 3
     assert response["Items"][0] in expected_nodes
     assert response["Items"][1] in expected_nodes
     assert response["Items"][2] in expected_nodes
 
-    duplicate_name_model = MyModel(name="Jane", age=-234, money=Decimal("-3424.00"))
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_unique_index():
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model.save()
+
+    duplicate_name_model = MyModel(name="John", age=-234, money=Decimal("-3424.00"))
     with pytest.raises(RecordNotUniqueError) as error:
         duplicate_name_model.save()
 
-    assert str(error.value) == "Record already exists with unique key MyModel(name=Jane)"
+    assert str(error.value) == "Record already exists with unique key MyModel(name=John)"
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
+    expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(new_model)]
     assert response["Count"] == 3
+    assert response["Items"][0] in expected_nodes
+    assert response["Items"][1] in expected_nodes
+    assert response["Items"][2] in expected_nodes
 
-    response = MyModel.query(StandardQuery(statements=[StandardQueryStatement("name", "eq", "Jane")]))
-    assert response.records[0]
 
-    gotten_model.delete()
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_query():
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model.save()
+
+    response = MyModel.query(StandardQuery(statements=[StandardQueryStatement("name", "eq", "John")]), lazy=False)
+    assert len(response._batches) == 1
+    assert len(response._batches[0]) == 1
+    assert response.records[0] == new_model
+    assert response.next_batch()[0] == new_model
+
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_delete():
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model.save()
+
+    new_model.delete()
 
     gotten_model = MyModel.get_by_id(new_model.id)
     assert not gotten_model
