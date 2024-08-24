@@ -125,8 +125,13 @@ class Model(BaseModel):
         return cls.model_validate_json(base_node.raw_data)
 
     @classmethod
-    def query(cls, query: QueryTypes) -> QueryResult[Self]:
-        return QueryResult(Querier(cls, query, cls.__immaterial_root_config__.dynamodb_provider))
+    def query(
+        cls, query: QueryTypes, descending: bool = False, max_items: int | None = None, lazy: bool = True
+    ) -> QueryResult[Self]:
+        querier = Querier(
+            cls, query, cls.__immaterial_root_config__.dynamodb_provider, scan_index_forward=not descending
+        )
+        return QueryResult(querier=querier, lazy=lazy, max_items=max_items)
 
     def delete(self):
         self.delete_by_id(self.id)
