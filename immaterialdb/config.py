@@ -1,10 +1,12 @@
 import hashlib
 from datetime import datetime, timezone
-from enum import StrEnum, auto
-from typing import Any, Callable, ClassVar, Literal, NamedTuple, Protocol, Self, Type
+from typing import Any, Callable, ClassVar, Literal, Protocol, Self, Type
 
 import ulid
 from pydantic import BaseModel, Field, model_validator
+
+from immaterialdb.nodes import NodeTypeList, QueryNode, UniqueNode
+from immaterialdb.types import FieldValue
 
 
 class RootConfig:
@@ -81,9 +83,7 @@ class Model(BaseModel):
 
     @property
     def hash_for_update(self) -> str:
-        return hashlib.md5(
-            self.model_dump_json(exclude={"updated_hash", "updated_at"}).encode("utf-8")
-        ).hexdigest()
+        return hashlib.md5(self.model_dump_json(exclude={"updated_hash", "updated_at"}).encode("utf-8")).hexdigest()
 
     @model_validator(mode="after")
     def check_for_updates(self) -> Self:
@@ -94,17 +94,17 @@ class Model(BaseModel):
 
         return self
 
-    def fetch_values_from_field_list(self, field_list: list[str]) -> list[Any]:
-        values = []
+    def fetch_field_values(self, field_list: list[str]) -> list[FieldValue]:
+        field_values: list[FieldValue] = []
         for field in field_list:
             try:
-                values.append(getattr(self, field))
+                field_values.append(FieldValue(field, getattr(self, field)))
             except AttributeError as e:
                 raise FieldMisconfigurationError(
                     f"Field {field} is not present in the model {self.model_name()}"
                 ) from e
 
-        return values
+        return field_values
 
     @classmethod
     def model_name(cls) -> str:
@@ -132,96 +132,27 @@ class Model(BaseModel):
         validate_assignment = True
 
 
-class NodeTypes(StrEnum):
-    base = auto()
-    unique = auto()
-    query = auto()
-
-
-class Node(BaseModel):
-    node_type: NodeTypes
-    model_name: str
-    entity_id: str
-    pk: str
-    sk: str
-
-
-PrimaryKey = NamedTuple("PrimaryKey", [("pk", str), ("sk", str)])
-PrimaryKeys = list[PrimaryKey]
-
-
-class BaseNode(Node):
-    node_type: Literal[NodeTypes.base] = NodeTypes.base
-    base_node: Literal[NodeTypes.base] = NodeTypes.base
-    raw_data: str
-    other_nodes: PrimaryKeys
-
-
-class UniqueNode(Node):
-    node_type: Literal[NodeTypes.unique] = NodeTypes.unique
-    unique_node: Literal[NodeTypes.unique] = NodeTypes.unique
-    field_names: list[str]
-    field_values: list[str]
-
-    @model_validator(mode="before")
-    @classmethod
-    def gen_pk_and_sk(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-
-        field_names: list[str] = data.get("field_names", [])
-        field_values: list[str] = data.get("field_values", [])
-        fields_and_values = zip(field_names, field_values)
-        pk_string = "##".join(
-            map(lambda x: f"{x[0]}@{x[1]}", fields_and_values)
-        )  # TODO: serialize
-        data["pk"] = data.get("model_name", "") + "{" + pk_string + "}"
-        data["sk"] = data.get("entity_id")
-        return data
-
-
-class QueryNode(Node):
-    node_type: Literal[NodeTypes.query] = NodeTypes.query
-    query_node: Literal[NodeTypes.query] = NodeTypes.query
-    partition_field_names: list[str]
-    partition_field_values: list[str]
-    sort_field_names: list[str]
-    sort_field_values: list[str]
-
-    @property
-    def pk(self) -> str:
-        return self.partition_field_values[0]
-
-    @property
-    def sk(self) -> str:
-        return self.sort_field_values[0]
-
-
-NodeType = BaseNode | UniqueNode | QueryNode
-NodeTypeList = list[NodeType]
-
-
 def materialize_model(model: Model) -> NodeTypeList:
     nodes: NodeTypeList = []
 
     for index in model.__immaterial_model_config__.indices:
         if index.node_name == "unique_fields":
-            field_values = model.fetch_values_from_field_list(index.unique_fields)
-            field_and_values = zip(index.unique_fields, field_values)
-            unique_node = UniqueNode(
+            field_values = model.fetch_field_values(index.unique_fields)
+            unique_node = UniqueNode.create(
                 model_name=model.model_name(),
                 entity_id=model.id,
-                pk=model.id,
-                sk=model.id,
+                fields=field_values,
             )
             nodes.append(unique_node)
 
         elif index.node_name == "index_fields":
-            index_node = QueryNode(
+            partition_field_values = model.fetch_field_values(index.partition_fields)
+            sort_field_values = model.fetch_field_values(index.sort_fields)
+            index_node = QueryNode.create(
                 model_name=model.model_name(),
                 entity_id=model.id,
-                pk=model.id,
-                sk="index",
+                partition_fields=partition_field_values,
+                sort_fields=sort_field_values,
             )
             nodes.append(index_node)
     return nodes
@@ -253,9 +184,7 @@ class ImmaterialDecorators:
 
     def register_model(self, indices: Indices) -> Callable[[Type[Model]], Type[Model]]:
         def decorator(model_cls: Type[Model]) -> Type[Model]:
-            model_cls.__immaterial_model_config__ = ModelConfig(
-                root_config=self.config, indices=indices
-            )
+            model_cls.__immaterial_model_config__ = ModelConfig(root_config=self.config, indices=indices)
             model_cls.__immaterial_root_config__ = self.config
             self.config.registered_models[model_cls.model_name()] = model_cls
             return model_cls
