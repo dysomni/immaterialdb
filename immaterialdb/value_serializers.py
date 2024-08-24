@@ -6,7 +6,7 @@ from uuid import UUID
 
 import ulid
 
-from immaterialdb.constants import LOGGER
+from immaterialdb.constants import LOGGER, SEPERATOR
 from immaterialdb.types import FieldValue, PrimaryKey
 
 INT_MAX_LENGTH = 20
@@ -15,20 +15,28 @@ FLOAT_FRAC_MAX_LENGTH = 10
 
 
 def serialize_for_query_node_primary_key(
-    model_name: str, pk_fields: list[FieldValue], sk_fields: list[FieldValue]
+    model_name: str, entity_id: str, pk_fields: list[FieldValue], sk_fields: list[FieldValue]
 ) -> PrimaryKey:
-    return PrimaryKey("", "")
+    key_value_pairs = ",".join([f"{field.name}={serialize_for_index(field.value)}" for field in pk_fields])
+    sort_field_names = ",".join([field.name for field in sk_fields])
+    sort_field_values = SEPERATOR.join(
+        [serialize_for_index(field.value, ensure_lexigraphic_sortability=True) for field in sk_fields]
+    )
+    pk = f"{model_name}[{key_value_pairs}][{sort_field_names}]"
+    sk = f"{sort_field_values}{SEPERATOR}{entity_id}"
+    return PrimaryKey(pk, sk)
 
 
 def serialize_for_unique_node_primary_key(
-    model_name: str, unique_fields: list[FieldValue]
+    model_name: str, entity_id: str, unique_fields: list[FieldValue]
 ) -> PrimaryKey:
-    return PrimaryKey("", "")
+    key_value_pairs = ",".join([f"{field.name}={serialize_for_index(field.value)}" for field in unique_fields])
+    pk = f"{model_name}({key_value_pairs})"
+    sk = entity_id
+    return PrimaryKey(pk, sk)
 
 
-def serialize_for_index(
-    value: Any, ensure_lexigraphic_sortability: bool = False
-) -> str:
+def serialize_for_index(value: Any, ensure_lexigraphic_sortability: bool = False) -> str:
     if isinstance(value, str):
         return value
     elif isinstance(value, int):
@@ -80,18 +88,14 @@ def int_to_lexicographic_string(n: int, width=INT_MAX_LENGTH) -> str:
     return f"{sign}{n_padded}"
 
 
-def float_to_lexicographic_string(
-    f: float, int_width=FLOAT_INT_MAX_LENGTH, frac_width=FLOAT_FRAC_MAX_LENGTH
-):
+def float_to_lexicographic_string(f: float, int_width=FLOAT_INT_MAX_LENGTH, frac_width=FLOAT_FRAC_MAX_LENGTH):
     if f < 0:
         sign = "0"  # Use '0' for negative numbers
         f = -f  # Make the number positive for easier formatting
         integer_part, fractional_part = f"{f:.{frac_width}f}".split(".")
         # Reverse the digits for negative numbers
         integer_part_padded = str(10**int_width - int(integer_part)).zfill(int_width)
-        fractional_part_padded = str(10**frac_width - int(fractional_part)).zfill(
-            frac_width
-        )
+        fractional_part_padded = str(10**frac_width - int(fractional_part)).zfill(frac_width)
     else:
         sign = "1"  # Use '1' for positive numbers
         integer_part, fractional_part = f"{f:.{frac_width}f}".split(".")
@@ -102,18 +106,14 @@ def float_to_lexicographic_string(
     return f"{sign}{integer_part_padded}.{fractional_part_padded}"
 
 
-def decimal_to_lexicographic_string(
-    d: Decimal, int_width=INT_MAX_LENGTH, frac_width=INT_MAX_LENGTH
-):
+def decimal_to_lexicographic_string(d: Decimal, int_width=INT_MAX_LENGTH, frac_width=INT_MAX_LENGTH):
     if d < 0:
         sign = "0"  # Use '0' for negative numbers
         d = -d
         integer_part, fractional_part = str(d).split(".")
         # Reverse the digits for negative numbers
         integer_part_padded = str(10**int_width - int(integer_part)).zfill(int_width)
-        fractional_part_padded = str(10**frac_width - int(fractional_part)).zfill(
-            frac_width
-        )
+        fractional_part_padded = str(10**frac_width - int(fractional_part)).zfill(frac_width)
     else:
         sign = "1"
         integer_part, fractional_part = str(d).split(".")

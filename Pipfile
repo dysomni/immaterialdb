@@ -13,6 +13,7 @@ moto = "*"
 pytest = "*"
 ipykernel = "*"
 ipython = "*"
+boto3-stubs = {extras = ["dynamodb", "s3"], version = "*"}
 
 [requires]
 python_version = "3.12"
