@@ -35,15 +35,13 @@ def serialize_for_query_node_partial_sort_key(sk_fields: list[FieldValue]) -> st
     sort_field_values = SEPERATOR.join(
         [serialize_for_index(field.value, ensure_lexigraphic_sortability=True) for field in sk_fields]
     )
-    return f"{sort_field_values}"
+    return f"{SEPERATOR}{sort_field_values}"
 
 
-def serialize_for_unique_node_primary_key(
-    entity_name: str, entity_id: str, unique_fields: list[FieldValue]
-) -> PrimaryKey:
+def serialize_for_unique_node_primary_key(entity_name: str, unique_fields: list[FieldValue]) -> PrimaryKey:
     key_value_pairs = ",".join([f"{field.name}={serialize_for_index(field.value)}" for field in unique_fields])
     pk = f"{entity_name}({key_value_pairs})"
-    sk = entity_id
+    sk = "unique"
     return PrimaryKey(pk, sk)
 
 

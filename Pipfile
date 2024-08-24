@@ -9,11 +9,11 @@ boto3 = "*"
 ulid-py = "*"
 
 [dev-packages]
-moto = "*"
+moto = "<5"
 pytest = "*"
 ipykernel = "*"
 ipython = "*"
-boto3-stubs = {extras = ["dynamodb", "s3"], version = "*"}
+boto3-stubs = {extras = ["dynamodb", "s3", "boto3"], version = "*"}
 
 [requires]
 python_version = "3.12"

@@ -32,7 +32,7 @@ class Node(BaseModel, ABC):
     def assemble_transaction_item_delete(self, table_name: str) -> TransactWriteItemTypeDef:
         return {
             "Delete": {
-                "Key": {"pk": self.pk, "sk": self.sk},
+                "Key": {"pk": TypeSerializer().serialize(self.pk), "sk": TypeSerializer().serialize(self.sk)},
                 "TableName": table_name,
             }
         }
@@ -46,7 +46,7 @@ class Node(BaseModel, ABC):
 
     @classmethod
     def from_dynamo(cls, dynamo_item: dict[str, AttributeValueTypeDef]) -> Self:
-        return cls(**{k: TypeDeserializer().deserialize(v) for k, v in dynamo_item.items()})
+        return cls.model_validate({k: TypeDeserializer().deserialize(v) for k, v in dynamo_item.items()})
 
 
 class BaseNode(Node):
@@ -71,7 +71,7 @@ class UniqueNode(Node):
 
     @classmethod
     def create(cls, entity_name: str, entity_id: str, fields: list[FieldValue]) -> Self:
-        pk, sk = serialize_for_unique_node_primary_key(entity_name, entity_id, fields)
+        pk, sk = serialize_for_unique_node_primary_key(entity_name, fields)
         return cls(entity_name=entity_name, entity_id=entity_id, fields=fields, pk=pk, sk=sk)
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
@@ -79,8 +79,8 @@ class UniqueNode(Node):
             "Put": {
                 "Item": self.for_dynamo(),
                 "TableName": table_name,
-                "ConditionExpression": "attribute_not_exists(pk) OR sk = :current_sk",
-                "ExpressionAttributeValues": {":current_sk": self.sk},
+                "ConditionExpression": "attribute_not_exists(pk) OR entity_id = :current_id",
+                "ExpressionAttributeValues": {":current_id": TypeSerializer().serialize(self.entity_id)},
             }
         }
 
@@ -90,10 +90,16 @@ class QueryNode(Node):
     query_node: Literal[NodeTypes.query] = NodeTypes.query
     partition_fields: list[FieldValue]
     sort_fields: list[FieldValue]
+    raw_data: str
 
     @classmethod
     def create(
-        cls, entity_name: str, entity_id: str, partition_fields: list[FieldValue], sort_fields: list[FieldValue]
+        cls,
+        entity_name: str,
+        entity_id: str,
+        partition_fields: list[FieldValue],
+        sort_fields: list[FieldValue],
+        raw_data: str,
     ) -> Self:
         pk, sk = serialize_for_query_node_primary_key(entity_name, entity_id, partition_fields, sort_fields)
         return cls(
@@ -103,6 +109,7 @@ class QueryNode(Node):
             sort_fields=sort_fields,
             pk=pk,
             sk=sk,
+            raw_data=raw_data,
         )
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:

@@ -66,17 +66,10 @@ class DynamodbConnectionProvider:
         finally:
             try:
                 # Release the lock
-                self.table.delete_item(
-                    Key={"pk": id},
-                    ConditionExpression="sk = :lock_value",
-                    ExpressionAttributeValues={":lock_value": lock_value},
-                )
+                self.table.delete_item(Key={"pk": id, "sk": lock_value})
                 LOGGER.debug(f"Lock released for {id}")
             except ClientError as e:
-                if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                    LOGGER.warning(f"Failed to release lock for {id}, someone else has already taken it")
-                else:
-                    raise
+                LOGGER.warning(f"Failed to release lock for {id}, {e}")
 
     def create_table(self):
         table = self.resource.create_table(

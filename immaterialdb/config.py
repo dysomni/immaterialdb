@@ -1,4 +1,4 @@
-from typing import Callable, Protocol, Type
+from typing import Callable, Protocol, Type, TypeVar
 
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
 from immaterialdb.model import Indices, Model, ModelConfig
@@ -41,6 +41,9 @@ class EncryptionFuncType(Protocol):
     def __call__(self, text: str) -> str: ...
 
 
+ModelType = TypeVar("ModelType", bound=Model)
+
+
 class ImmaterialDecorators:
     def __init__(self, config: RootConfig):
         self.config = config
@@ -61,8 +64,8 @@ class ImmaterialDecorators:
 
         return decorator
 
-    def register_model(self, indices: Indices | None = None) -> Callable[[Type[Model]], Type[Model]]:
-        def decorator(model_cls: Type[Model]) -> Type[Model]:
+    def register_model(self, indices: Indices | None = None) -> Callable[[Type[ModelType]], Type[ModelType]]:
+        def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
             model_cls.__immaterial_model_config__ = ModelConfig(root_config=self.config, indices=indices or [])
             model_cls.__immaterial_root_config__ = self.config
             self.config.registered_models[model_cls.immaterial_model_name()] = model_cls

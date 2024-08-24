@@ -5,9 +5,10 @@ from typing import TYPE_CHECKING, ClassVar, Literal, Self
 import ulid
 from mypy_boto3_dynamodb import DynamoDBClient
 from mypy_boto3_dynamodb.service_resource import Table
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from immaterialdb.errors import FieldMisconfigurationError
+from immaterialdb.constants import LOGGER
+from immaterialdb.errors import FieldMisconfigurationError, transaction_write_error_boundary
 from immaterialdb.nodes import (
     BaseNode,
     NodeTransactionItem,
@@ -17,7 +18,7 @@ from immaterialdb.nodes import (
     QueryNode,
     UniqueNode,
 )
-from immaterialdb.query import Querier, QueryResult, QueryTypes, StandardQuery
+from immaterialdb.query import BatchQueryResult, Querier, QueryTypes, StandardQuery
 from immaterialdb.types import FieldValue, PrimaryKey
 
 if TYPE_CHECKING:
@@ -59,6 +60,8 @@ class Model(BaseModel):
     __immaterial_root_config__: ClassVar["RootConfig"]
     __immaterial_model_config__: ClassVar[ModelConfig]
     __immaterial_model_name__: ClassVar[str | None] = None
+
+    model_config = ConfigDict(validate_assignment=True)
 
     id: str = Field(default_factory=lambda: ulid.new().str)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -122,12 +125,12 @@ class Model(BaseModel):
 
     @classmethod
     def query(
-        cls, query: QueryTypes, descending: bool = False, max_items: int | None = None, lazy: bool = True
-    ) -> QueryResult[Self]:
+        cls, query: QueryTypes, descending: bool = False, max_records: int | None = None, lazy: bool = True
+    ) -> BatchQueryResult[Self]:
         querier = Querier(
             cls, query, cls.__immaterial_root_config__.dynamodb_provider, scan_index_forward=not descending
         )
-        return QueryResult(querier=querier, lazy=lazy, max_items=max_items)
+        return BatchQueryResult(querier=querier, lazy=lazy, max_records=max_records)
 
     def delete(self):
         self.delete_by_id(self.id)
@@ -166,20 +169,21 @@ class Model(BaseModel):
 
     @classmethod
     def _write_transaction(cls, transaction_items: NodeTransactionList):
-        cls._client().transact_write_items(
-            TransactItems=[
-                *[
-                    node.assemble_transaction_item_delete(cls._table_name())
-                    for node, action in transaction_items
-                    if action == "delete"
-                ],
-                *[
-                    node.assemble_transaction_item_put(cls._table_name())
-                    for node, action in transaction_items
-                    if action == "put"
-                ],
-            ]
-        )
+        items = [
+            *[
+                node.assemble_transaction_item_delete(cls._table_name())
+                for node, action in transaction_items
+                if action == "delete"
+            ],
+            *[
+                node.assemble_transaction_item_put(cls._table_name())
+                for node, action in transaction_items
+                if action == "put"
+            ],
+        ]
+        LOGGER.info(f"Writing transaction items: {items}")
+        with transaction_write_error_boundary(items):
+            cls._client().transact_write_items(TransactItems=items)
 
     @classmethod
     def _table(cls) -> Table:
@@ -207,15 +211,12 @@ class Model(BaseModel):
                 continue
 
             # ensure that the index contains all the fields of the standard query
-            if index.all_fields[: len(standard_query.all_fields)] != index.all_fields:
+            if index.all_fields[: len(standard_query.all_fields)] != standard_query.all_fields:
                 continue
 
             return index
 
         return None
-
-    class Config:
-        validate_assignment = True
 
 
 def materialize_model(model: Model) -> NodeTypeList:
@@ -239,6 +240,7 @@ def materialize_model(model: Model) -> NodeTypeList:
                 entity_id=model.id,
                 partition_fields=partition_field_values,
                 sort_fields=sort_field_values,
+                raw_data=model.model_dump_json(),
             )
             nodes.append(index_node)
 

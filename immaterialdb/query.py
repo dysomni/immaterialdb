@@ -5,6 +5,7 @@ from boto3.dynamodb.conditions import Key
 
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
 from immaterialdb.errors import QueryNotSupportedError
+from immaterialdb.nodes import QueryNode
 from immaterialdb.types import FieldValue, LastEvaluatedKey
 from immaterialdb.value_serializers import (
     serialize_for_query_node_partial_sort_key,
@@ -17,11 +18,11 @@ if TYPE_CHECKING:
 T = TypeVar("T", bound="Model")
 
 
-class QueryResultSingleIterator(Generic[T]):
-    _parent: "QueryResult[T]"
+class RecordQueryResult(Generic[T]):
+    _parent: "BatchQueryResult[T]"
     _current_index: int
 
-    def __init__(self, parent: "QueryResult[T]"):
+    def __init__(self, parent: "BatchQueryResult[T]"):
         self._parent = parent
         self._current_index = 0
 
@@ -29,36 +30,46 @@ class QueryResultSingleIterator(Generic[T]):
         return self
 
     def __next__(self) -> T:
-        if self._current_index >= len(self._parent._flattened_items):
-            new_items: list[T] = []
-            while not new_items:
-                new_items = next(self._parent)
+        if self._current_index >= len(self._parent._flattened_records):
+            new_records: list[T] = []
+            while not new_records:
+                new_records = next(self._parent)
 
-        entity = self._parent._flattened_items[self._current_index]
+        entity = self._parent._flattened_records[self._current_index]
         self._current_index += 1
         return entity
 
+    def __getitem__(self, index: int) -> T:
+        try:
+            while True:
+                try:
+                    return self._parent._flattened_records[index]
+                except IndexError:
+                    next(self._parent)
+        except StopIteration:
+            raise IndexError("Index out of range")
 
-class QueryResult(Generic[T]):
-    batches: list[list[T]]
-    items: QueryResultSingleIterator[T]
+
+class BatchQueryResult(Generic[T]):
+    records: RecordQueryResult[T]
     last_evaluated_key: LastEvaluatedKey | None
     more_to_query: bool
     querier: "Querier"
 
-    _flattened_items: list[T]
+    _batches: list[list[T]]
+    _flattened_records: list[T]
     _current_batch_index: int
-    _max_items: int | None
+    _max_records: int | None
 
-    def __init__(self, querier: "Querier[T]", lazy: bool = True, max_items: int | None = None):
-        self.batches = []
+    def __init__(self, querier: "Querier[T]", lazy: bool = True, max_records: int | None = None):
+        self._batches = []
         self._current_batch_index = 0
         self.last_evaluated_key = None
-        self._flattened_items = []
+        self._flattened_records = []
         self.more_to_query = True
         self.querier = querier
-        self.items = QueryResultSingleIterator(self)
-        self._max_items = max_items
+        self.records = RecordQueryResult(self)
+        self._max_records = max_records
 
         if not lazy:
             list(self)  # trigger the iteration to run the query
@@ -68,43 +79,49 @@ class QueryResult(Generic[T]):
         return self
 
     def __next__(self) -> list[T]:
-        if self._current_batch_index >= len(self.batches):
-            if not self.more_to_query or self.reached_max_items:
+        if self._current_batch_index >= len(self._batches):
+            if not self.more_to_query or self.reached_max_records:
                 raise StopIteration
 
             result = self.querier.query(self.last_evaluated_key, self.next_limit)
-            self.batches.append(result.items)
+            self._batches.append(result.records)
             self.last_evaluated_key = result.last_evaluated_key
             self.more_to_query = result.more_to_query
 
-        batch = self.batches[self._current_batch_index]
+        batch = self._batches[self._current_batch_index]
         self._current_batch_index += 1
         return batch
 
     @property
-    def reached_max_items(self) -> bool:
-        return self._max_items is not None and len(self._flattened_items) >= self._max_items
+    def reached_max_records(self) -> bool:
+        return self._max_records is not None and len(self._flattened_records) >= self._max_records
 
     @property
     def next_limit(self) -> int:
         batch_size = 50
-        if self._max_items and self._max_items <= len(self._flattened_items):
+        if self._max_records and self._max_records <= len(self._flattened_records):
             return 0
 
-        if self._max_items:
-            remaining = self._max_items - len(self._flattened_items)
+        if self._max_records:
+            remaining = self._max_records - len(self._flattened_records)
             return min(remaining, batch_size)
 
         return batch_size
 
+    def next_batch(self) -> list[T] | None:
+        try:
+            return next(self)
+        except StopIteration:
+            return None
+
 
 class QueryActionResult(Generic[T]):
-    items: list[T]
+    records: list[T]
     last_evaluated_key: LastEvaluatedKey | None
     more_to_query: bool
 
-    def __init__(self, items: list[T], last_evaluated_key: LastEvaluatedKey | None, more_to_query: bool):
-        self.items = items
+    def __init__(self, records: list[T], last_evaluated_key: LastEvaluatedKey | None, more_to_query: bool):
+        self.records = records
         self.last_evaluated_key = last_evaluated_key
         self.more_to_query = more_to_query
 
@@ -160,11 +177,13 @@ class Querier(Generic[T]):
             Limit=limit,
         )
 
-        items = [self.model_cls.model_validate(item) for item in result.get("Items", [])]
+        query_nodes = [QueryNode.model_validate(item) for item in result.get("Items", [])]
+        records = [self.model_cls.model_validate_json(node.raw_data) for node in query_nodes]
+
         last_evaluated_key = result["LastEvaluatedKey"] if "LastEvaluatedKey" in result else None
         more_to_query = "LastEvaluatedKey" in result
 
-        return QueryActionResult(items, last_evaluated_key, more_to_query)
+        return QueryActionResult(records, last_evaluated_key, more_to_query)
 
 
 StandardQueryStatement = NamedTuple(
