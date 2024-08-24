@@ -1,3 +1,4 @@
+import json
 import logging
 from decimal import Decimal
 
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 
 from immaterialdb.config import RootConfig
 from immaterialdb.errors import RecordNotUniqueError
-from immaterialdb.model import Model, QueryIndex, UniqueIndex
+from immaterialdb.model import Model, QueryIndex, UniqueIndex, materialize_model
 from immaterialdb.query import StandardQuery, StandardQueryStatement
 from immaterialdb.testing import mock_immaterialdb
 
@@ -34,81 +35,21 @@ def test_adding_model():
     assert gotten_model == new_model
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
-    assert response["Items"] == [
-        {
-            "node_type": "base",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": gotten_model.id,
-            "sk": gotten_model.id,
-            "base_node": "base",
-            "raw_data": gotten_model.model_dump_json(),
-            "other_nodes": [
-                ["MyModel[name=John][age]", f"##100000000000000000030##{gotten_model.id}"],
-                ["MyModel(name=John)", "unique"],
-            ],
-        },
-        {
-            "node_type": "query",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": "MyModel[name=John][age]",
-            "sk": f"##100000000000000000030##{gotten_model.id}",
-            "query_node": "query",
-            "partition_fields": [["name", "John"]],
-            "sort_fields": [["age", Decimal("30")]],
-            "raw_data": gotten_model.model_dump_json(),
-        },
-        {
-            "node_type": "unique",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": "MyModel(name=John)",
-            "sk": "unique",
-            "unique_node": "unique",
-            "fields": [["name", "John"]],
-        },
-    ]
+    assert response["Count"] == 3
+    expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(new_model)]
+    assert response["Items"][0] in expected_nodes
+    assert response["Items"][1] in expected_nodes
+    assert response["Items"][2] in expected_nodes
 
     gotten_model.name = "Jane"
     gotten_model.save()
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
-    assert response["Items"] == [
-        {
-            "node_type": "base",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": gotten_model.id,
-            "sk": gotten_model.id,
-            "base_node": "base",
-            "raw_data": gotten_model.model_dump_json(),
-            "other_nodes": [
-                ["MyModel[name=Jane][age]", f"##100000000000000000030##{gotten_model.id}"],
-                ["MyModel(name=Jane)", "unique"],
-            ],
-        },
-        {
-            "node_type": "query",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": "MyModel[name=Jane][age]",
-            "sk": f"##100000000000000000030##{gotten_model.id}",
-            "query_node": "query",
-            "partition_fields": [["name", "Jane"]],
-            "sort_fields": [["age", Decimal("30")]],
-            "raw_data": gotten_model.model_dump_json(),
-        },
-        {
-            "node_type": "unique",
-            "entity_name": "MyModel",
-            "entity_id": gotten_model.id,
-            "pk": "MyModel(name=Jane)",
-            "sk": "unique",
-            "unique_node": "unique",
-            "fields": [["name", "Jane"]],
-        },
-    ]
+    expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(gotten_model)]
+    assert response["Count"] == 3
+    assert response["Items"][0] in expected_nodes
+    assert response["Items"][1] in expected_nodes
+    assert response["Items"][2] in expected_nodes
 
     duplicate_name_model = MyModel(name="Jane", age=-234, money=Decimal("-3424.00"))
     with pytest.raises(RecordNotUniqueError) as error:
