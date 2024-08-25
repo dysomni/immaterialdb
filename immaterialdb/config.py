@@ -68,6 +68,8 @@ class ImmaterialDecorators:
     def register_model(
         self, indices: IndicesType | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
+        # TODO - validate no overlapping indices
+        # TODO - auto ordering of indices for best match (prefering sort key over partition key)
         def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
             model_cls.__immaterial_model_config__ = ModelConfig(
                 root_config=self.config,
