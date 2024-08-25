@@ -20,6 +20,7 @@ from immaterialdb.nodes import (
 )
 from immaterialdb.query import BatchQueryResult, Querier, QueryTypes, StandardQuery
 from immaterialdb.types import FieldValue, LastEvaluatedKey, PrimaryKey
+from immaterialdb.value_serializers import serialize_field_values_for_dynamo
 
 if TYPE_CHECKING:
     from immaterialdb.config import RootConfig
@@ -287,7 +288,7 @@ def materialize_model(model: Model) -> NodeTypeList:
             unique_node = UniqueNode.create(
                 entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
-                fields=field_values,
+                fields=serialize_field_values_for_dynamo(field_values),
             )
             nodes.append(unique_node)
 
@@ -297,8 +298,8 @@ def materialize_model(model: Model) -> NodeTypeList:
             index_node = QueryNode.create(
                 entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
-                partition_fields=partition_field_values,
-                sort_fields=sort_field_values,
+                partition_fields=serialize_field_values_for_dynamo(partition_field_values),
+                sort_fields=serialize_field_values_for_dynamo(sort_field_values),
                 raw_data=model.model_dump_json(),
             )
             nodes.append(index_node)

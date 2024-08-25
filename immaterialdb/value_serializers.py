@@ -85,6 +85,28 @@ def serialize_for_index(value: Any, ensure_lexigraphic_sortability: bool = False
         return str(value)
 
 
+def serialize_for_dynamo_value(value: Any) -> Any:
+    if isinstance(value, datetime):
+        # if there isnt a timezone, assume it is UTC
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat()
+    elif isinstance(value, date):
+        return value.isoformat()
+    elif isinstance(value, UUID):
+        return str(value)
+    elif isinstance(value, ulid.ULID):
+        return value.str
+    elif isinstance(value, Enum):
+        return value.value
+    else:
+        return value
+
+
+def serialize_field_values_for_dynamo(field_values: list[FieldValue]) -> list[FieldValue]:
+    return [FieldValue(field.name, serialize_for_dynamo_value(field.value)) for field in field_values]
+
+
 def int_to_lexicographic_string(n: int, width=INT_MAX_LENGTH) -> str:
     if n < 0:
         sign = "0"  # Use '0' for negative numbers

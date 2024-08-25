@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import datetime
 from decimal import Decimal
 
 import pytest
@@ -15,12 +16,17 @@ IMMATERIALDB = RootConfig("test_table")
 
 
 @IMMATERIALDB.decorators.register_model(
-    [QueryIndex(partition_fields=["name"], sort_fields=["age"]), UniqueIndex(unique_fields=["name"])]
+    [
+        QueryIndex(partition_fields=["name"], sort_fields=["age"]),
+        QueryIndex(partition_fields=["name"], sort_fields=["awesome"]),
+        UniqueIndex(unique_fields=["name"]),
+    ]
 )
 class MyModel(Model):
     name: str
     age: int
     money: Decimal
+    awesome: datetime
 
 
 def test_adding_model():
@@ -29,7 +35,7 @@ def test_adding_model():
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_save_and_get():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
     gotten_model = MyModel.get_by_id(new_model.id)
@@ -37,16 +43,17 @@ def test_model_save_and_get():
     assert gotten_model == new_model
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
-    assert response["Count"] == 3
+    assert response["Count"] == 4
     expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(new_model)]
     assert response["Items"][0] in expected_nodes
     assert response["Items"][1] in expected_nodes
     assert response["Items"][2] in expected_nodes
+    assert response["Items"][3] in expected_nodes
 
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_update():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
     updated_model = new_model.copy()
@@ -55,18 +62,19 @@ def test_model_update():
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
     expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(updated_model)]
-    assert response["Count"] == 3
+    assert response["Count"] == 4
     assert response["Items"][0] in expected_nodes
     assert response["Items"][1] in expected_nodes
     assert response["Items"][2] in expected_nodes
+    assert response["Items"][3] in expected_nodes
 
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_unique_index():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
-    duplicate_name_model = MyModel(name="John", age=-234, money=Decimal("-3424.00"))
+    duplicate_name_model = MyModel(name="John", age=-234, money=Decimal("-3424.00"), awesome=datetime.now())
     with pytest.raises(RecordNotUniqueError) as error:
         duplicate_name_model.save()
 
@@ -74,15 +82,16 @@ def test_model_unique_index():
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
     expected_nodes = [json.loads(node.model_dump_json()) for node in materialize_model(new_model)]
-    assert response["Count"] == 3
+    assert response["Count"] == 4
     assert response["Items"][0] in expected_nodes
     assert response["Items"][1] in expected_nodes
     assert response["Items"][2] in expected_nodes
+    assert response["Items"][3] in expected_nodes
 
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_query():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
     response = MyModel.query(StandardQuery(statements=[StandardQueryStatement("name", "eq", "John")]))
@@ -91,7 +100,7 @@ def test_model_query():
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_query_all():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
     response = MyModel.query(AllQuery())
@@ -100,7 +109,7 @@ def test_model_query_all():
 
 @mock_immaterialdb(IMMATERIALDB)
 def test_model_delete():
-    new_model = MyModel(name="John", age=30, money=Decimal("100.00"))
+    new_model = MyModel(name="John", age=30, money=Decimal("100.00"), awesome=datetime.now())
     new_model.save()
 
     new_model.delete()
