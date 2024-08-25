@@ -6,7 +6,7 @@ from uuid import UUID
 
 import ulid
 
-from immaterialdb.constants import LOGGER, SEPERATOR
+from immaterialdb.constants import LOGGER, MAX_CHAR, MIN_CHAR, SEPERATOR
 from immaterialdb.types import FieldValue, PrimaryKey
 
 INT_MAX_LENGTH = 20
@@ -152,3 +152,17 @@ def decimal_to_lexicographic_string(d: Decimal, int_width=INT_MAX_LENGTH, frac_w
         fractional_part_padded = fractional_part.ljust(frac_width, "0")
 
     return f"{sign}{integer_part_padded}.{fractional_part_padded}"
+
+
+def increment_ord_of_last_char(s: str) -> str:
+    last_char = s[-1]
+    if last_char == MAX_CHAR:
+        return increment_ord_of_last_char(s[:-1]) + MIN_CHAR
+    return s[:-1] + chr(ord(last_char) + 1)
+
+
+def decrement_ord_of_last_char(s: str) -> str:
+    last_char = s[-1]
+    if last_char == MIN_CHAR:
+        return decrement_ord_of_last_char(s[:-1]) + MAX_CHAR
+    return s[:-1] + chr(ord(last_char) - 1)

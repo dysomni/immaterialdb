@@ -1,14 +1,18 @@
+from copy import deepcopy
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Generic, Literal, NamedTuple, Self, TypeVar
 
 from boto3.dynamodb.conditions import Key
 from mypy_boto3_dynamodb.type_defs import ConditionBaseImportTypeDef
 
+from immaterialdb.constants import MAX_CHAR, MIN_CHAR, SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider, GsiNames
 from immaterialdb.errors import QueryNotSupportedError
 from immaterialdb.nodes import BaseNode, QueryNode
 from immaterialdb.types import FieldValue, LastEvaluatedKey
 from immaterialdb.value_serializers import (
+    decrement_ord_of_last_char,
+    increment_ord_of_last_char,
     serialize_for_query_node_partial_sort_key,
     serialize_for_query_node_partition_key,
 )
@@ -203,8 +207,11 @@ class Querier(Generic[T]):
         return QueryActionResult(records, last_evaluated_key, more_to_query)
 
     def standard_query_to_key_condition(self, standard_query: "StandardQuery") -> ConditionBaseImportTypeDef:
-        if not all(map(lambda statement: statement.operation == "eq", standard_query.statements)):
-            raise QueryNotSupportedError("Only 'eq' operations are supported in queries.")
+        # all statements except the last must be "eq" operations
+        if not all(map(lambda statement: statement.operation == "eq", standard_query.statements[:-1])):
+            raise QueryNotSupportedError(
+                "Only 'eq' operations are supported in queries, except for the last statement."
+            )
 
         index = self.model_cls._map_query_fields_to_index(standard_query)
         if not index:
@@ -219,16 +226,61 @@ class Querier(Generic[T]):
             for statement in standard_query.statements[len(index.partition_fields) :]
         ]
 
+        if not sk_fields and standard_query.statements[-1].operation != "eq":
+            raise QueryNotSupportedError(
+                "All fields given in the query are indexed in the partition key, so the last operation must be 'eq'."
+            )
+
         pk = serialize_for_query_node_partition_key(
             self.model_cls.immaterial_model_name(), pk_fields, index.sort_fields
         )
-        sk = serialize_for_query_node_partial_sort_key(sk_fields)
 
-        return Key("pk").eq(pk) & Key("sk").begins_with(sk)
+        match standard_query.statements[-1].operation:
+            case "eq":
+                sk = serialize_for_query_node_partial_sort_key(sk_fields)
+                if not sk.endswith(SEPERATOR):
+                    sk += SEPERATOR
+                return Key("pk").eq(pk) & Key("sk").begins_with(sk)
+
+            case "begins_with":
+                sk = serialize_for_query_node_partial_sort_key(sk_fields)
+                return Key("pk").eq(pk) & Key("sk").begins_with(sk)
+
+            case "gt":
+                start_sk = increment_ord_of_last_char(serialize_for_query_node_partial_sort_key(sk_fields))
+                end_sk = serialize_for_query_node_partial_sort_key(
+                    sk_fields[:-1] + [FieldValue(name="", value=MAX_CHAR)]
+                )
+                return Key("pk").eq(pk) & Key("sk").between(start_sk, end_sk)
+
+            case "lt":
+                start_sk = serialize_for_query_node_partial_sort_key(
+                    sk_fields[:-1] + [FieldValue(name="", value=MIN_CHAR)]
+                )
+                end_sk = decrement_ord_of_last_char(serialize_for_query_node_partial_sort_key(sk_fields))
+                return Key("pk").eq(pk) & Key("sk").between(start_sk, end_sk)
+
+            case "gte":
+                start_sk = serialize_for_query_node_partial_sort_key(sk_fields)
+                end_sk = serialize_for_query_node_partial_sort_key(
+                    sk_fields[:-1] + [FieldValue(name="", value=MAX_CHAR)]
+                )
+                return Key("pk").eq(pk) & Key("sk").between(start_sk, end_sk)
+
+            case "lte":
+                start_sk = serialize_for_query_node_partial_sort_key(
+                    sk_fields[:-1] + [FieldValue(name="", value=MIN_CHAR)]
+                )
+                end_sk = serialize_for_query_node_partial_sort_key(sk_fields + [FieldValue(name="", value=MAX_CHAR)])
+                return Key("pk").eq(pk) & Key("sk").between(start_sk, end_sk)
+
+            case _:
+                raise QueryNotSupportedError(f"Operation {standard_query.statements[-1].operation} is not supported.")
 
 
 StandardQueryStatement = NamedTuple(
-    "StandardQueryStatement", [("field", str), ("operation", Literal["eq"]), ("value", Any)]
+    "StandardQueryStatement",
+    [("field", str), ("operation", Literal["eq", "gt", "lt", "gte", "lte", "begins_with"]), ("value", Any)],
 )
 
 

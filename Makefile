@@ -1,0 +1,2 @@
+repl:
+	pipenv run ipython
