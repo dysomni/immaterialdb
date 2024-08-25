@@ -185,7 +185,7 @@ class Model(BaseModel):
                 LOGGER.debug(f"Field {field} is already encrypted, skipping encryption")
                 continue
 
-            setattr(self, field, self.__immaterial_root_config__._encrypt_string(value))
+            setattr(self, field, ENCRYPTED_FIELD_PREFIX + self.__immaterial_root_config__._encrypt_string(value))
 
     def decrypt_fields(self):
         for field in self.__immaterial_model_config__.encrypted_fields:
@@ -203,6 +203,7 @@ class Model(BaseModel):
                 LOGGER.debug(f"Field {field} is not encrypted, skipping decryption")
                 continue
 
+            value = value.replace(ENCRYPTED_FIELD_PREFIX, "")
             setattr(self, field, self.__immaterial_root_config__._decrypt_string(value))
 
     @classmethod
