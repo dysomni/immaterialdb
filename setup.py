@@ -10,6 +10,7 @@ setup(
         "pydantic",
         "ulid-py",
         "moto",
+        "boto3-stubs[dynamodb]",
     ],
     author="James Brock",
     author_email="contact@dysomni.com",
