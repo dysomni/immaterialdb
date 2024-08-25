@@ -13,6 +13,7 @@ IMMATERIALDB = RootConfig("test_table")
 
 @IMMATERIALDB.decorators.register_model(
     [
+        QueryIndex(partition_fields=[], sort_fields=["name"]),
         QueryIndex(partition_fields=["name"], sort_fields=["age"]),
         QueryIndex(partition_fields=[], sort_fields=["age"]),
         UniqueIndex(unique_fields=["name"]),
@@ -84,3 +85,18 @@ def test_query_gte(setup_db):
     assert query.records[0].age == 20
     assert query.records[1].age == 22
     assert query.records[2].age == 24
+
+
+def test_query_starts_with(setup_db):
+    query = MyModel.query(Queries.Standard([StandardQueryStatement("name", "begins_with", "John1")]))
+    assert query.records[0].name == "John1"
+    assert query.records[1].name == "John10"
+    assert query.records[2].name == "John100"
+    assert query.records[3].name == "John101"
+
+
+def test_query_eq(setup_db):
+    query = MyModel.query(Queries.Standard([StandardQueryStatement("name", "eq", "John1")]))
+    assert len(list(query.records)) == 1
+    assert query.last_evaluated_key is None
+    assert query.records[0].name == "John1"
