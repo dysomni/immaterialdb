@@ -6,8 +6,10 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        # List your dependencies here, e.g.,
-        # 'requests',
+        "boto3",
+        "pydantic",
+        "ulid-py",
+        "moto",
     ],
     author="James Brock",
     author_email="contact@dysomni.com",
@@ -20,5 +22,5 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
     ],
-    python_requires=">=3.9",
+    python_requires=">=3.11",
 )
