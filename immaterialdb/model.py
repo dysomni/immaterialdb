@@ -7,7 +7,7 @@ from mypy_boto3_dynamodb import DynamoDBClient
 from mypy_boto3_dynamodb.service_resource import Table
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from immaterialdb.constants import LOGGER
+from immaterialdb.constants import ENCRYPTED_FIELD_PREFIX, LOGGER
 from immaterialdb.errors import FieldMisconfigurationError, transaction_write_error_boundary
 from immaterialdb.nodes import (
     BaseNode,
@@ -46,14 +46,17 @@ Indices = list[UniqueIndex | QueryIndex]
 class ModelConfig:
     root_config: "RootConfig"
     indices: Indices
+    encrypted_fields: list[str]
 
     def __init__(
         self,
         root_config: "RootConfig",
         indices: Indices,
+        encrypted_fields: list[str] | None = None,
     ):
         self.root_config = root_config
         self.indices = indices
+        self.encrypted_fields = encrypted_fields or []
 
 
 class Model(BaseModel):
@@ -155,6 +158,42 @@ class Model(BaseModel):
                 *[NodeTransactionItem(node, "delete") for node in other_nodes],
             ]
             cls._write_transaction(transaction_items)
+
+    def encrypt_fields(self):
+        for field in self.__immaterial_model_config__.encrypted_fields:
+            if not hasattr(self, field):
+                raise FieldMisconfigurationError(
+                    f"Field for encryption {field} is not present in the model {self.immaterial_model_name()}"
+                )
+
+            value = getattr(self, field)
+            if not isinstance(value, str):
+                LOGGER.debug(f"Field {field} is not a string, skipping encryption")
+                continue
+
+            if value.startswith(ENCRYPTED_FIELD_PREFIX):
+                LOGGER.debug(f"Field {field} is already encrypted, skipping encryption")
+                continue
+
+            setattr(self, field, self.__immaterial_root_config__._encrypt_string(value))
+
+    def decrypt_fields(self):
+        for field in self.__immaterial_model_config__.encrypted_fields:
+            if not hasattr(self, field):
+                raise FieldMisconfigurationError(
+                    f"Field for decryption {field} is not present in the model {self.immaterial_model_name()}"
+                )
+
+            value = getattr(self, field)
+            if not isinstance(value, str):
+                LOGGER.debug(f"Field {field} is not a string, skipping decryption")
+                continue
+
+            if not value.startswith(ENCRYPTED_FIELD_PREFIX):
+                LOGGER.debug(f"Field {field} is not encrypted, skipping decryption")
+                continue
+
+            setattr(self, field, self.__immaterial_root_config__._decrypt_string(value))
 
     @classmethod
     def _get_base_node(cls, id: str) -> BaseNode | None:
