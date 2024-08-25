@@ -145,6 +145,7 @@ class Querier(Generic[T]):
     given_query: "QueryTypes"
     dynamodb_provider: DynamodbConnectionProvider
     scan_index_forward: bool
+    auto_decrypt: bool
 
     def __init__(
         self,
@@ -152,11 +153,13 @@ class Querier(Generic[T]):
         query: "QueryTypes",
         dynamodb_provider: DynamodbConnectionProvider,
         scan_index_forward: bool = True,
+        auto_decrypt: bool = True,
     ):
         self.model_cls = model_cls
         self.given_query = query
         self.dynamodb_provider = dynamodb_provider
         self.scan_index_forward = scan_index_forward
+        self.auto_decrypt = auto_decrypt
 
     def query(self, last_evaluated_key: LastEvaluatedKey | None = None, limit: int = 50) -> QueryActionResult[T]:
         extra = {"ConsistentRead": True}
@@ -190,6 +193,9 @@ class Querier(Generic[T]):
 
         query_nodes = [node_type_cls.model_validate(item) for item in result.get("Items", [])]
         records = [self.model_cls.model_validate_json(node.raw_data) for node in query_nodes]
+        if self.auto_decrypt:
+            for record in records:
+                record.decrypt_fields()
 
         last_evaluated_key = result["LastEvaluatedKey"] if "LastEvaluatedKey" in result else None
         more_to_query = "LastEvaluatedKey" in result

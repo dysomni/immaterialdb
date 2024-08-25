@@ -47,16 +47,19 @@ class ModelConfig:
     root_config: "RootConfig"
     indices: Indices
     encrypted_fields: list[str]
+    auto_decrypt: bool
 
     def __init__(
         self,
         root_config: "RootConfig",
         indices: Indices,
         encrypted_fields: list[str] | None = None,
+        auto_decrypt: bool = True,
     ):
         self.root_config = root_config
         self.indices = indices
         self.encrypted_fields = encrypted_fields or []
+        self.auto_decrypt = auto_decrypt
 
 
 class Model(BaseModel):
@@ -124,7 +127,10 @@ class Model(BaseModel):
         if not base_node:
             return None
 
-        return cls.model_validate_json(base_node.raw_data)
+        model = cls.model_validate_json(base_node.raw_data)
+        if cls.__immaterial_model_config__.auto_decrypt:
+            model.decrypt_fields()
+        return model
 
     @classmethod
     def query(
@@ -136,7 +142,11 @@ class Model(BaseModel):
         last_evaluated_key: LastEvaluatedKey | None = None,
     ) -> BatchQueryResult[Self]:
         querier = Querier(
-            cls, query, cls.__immaterial_root_config__.dynamodb_provider, scan_index_forward=not descending
+            cls,
+            query,
+            cls.__immaterial_root_config__.dynamodb_provider,
+            scan_index_forward=not descending,
+            auto_decrypt=cls.__immaterial_model_config__.auto_decrypt,
         )
         return BatchQueryResult(
             querier=querier, lazy=lazy, max_records=max_records, last_evaluated_key=last_evaluated_key
@@ -267,6 +277,8 @@ class Model(BaseModel):
 
 def materialize_model(model: Model) -> NodeTypeList:
     nodes: NodeTypeList = []
+    model = model.model_copy()
+    model.encrypt_fields()
 
     for index in model.__immaterial_model_config__.indices:
         if index.index_type == "unique":
