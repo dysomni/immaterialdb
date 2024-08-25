@@ -28,13 +28,12 @@ class RecordQueryResult(Generic[T]):
         self._current_index = 0
 
     def __iter__(self) -> Self:
+        self._current_index = 0
         return self
 
     def __next__(self) -> T:
-        if self._current_index >= len(self._parent._flattened_records):
-            new_records: list[T] = []
-            while not new_records:
-                new_records = next(self._parent)
+        while self._current_index >= len(self._parent._flattened_records):
+            next(self._parent)
 
         entity = self._parent._flattened_records[self._current_index]
         self._current_index += 1
@@ -258,3 +257,9 @@ class AllQuery:
 
 
 QueryTypes = StandardQuery | KeyConditionQuery | AllQuery
+
+
+class Queries:
+    Standard = StandardQuery
+    KeyCondition = KeyConditionQuery
+    All = AllQuery
