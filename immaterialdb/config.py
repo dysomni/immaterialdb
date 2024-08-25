@@ -2,7 +2,7 @@ from typing import Callable, Protocol, Type, TypeVar
 
 from immaterialdb.constants import SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
-from immaterialdb.model import Indices, Model, ModelConfig, UniqueIndex
+from immaterialdb.model import IndicesType, Model, ModelConfig, UniqueIndex
 
 
 class RootConfig:
@@ -66,7 +66,7 @@ class ImmaterialDecorators:
         return decorator
 
     def register_model(
-        self, indices: Indices | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
+        self, indices: IndicesType | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
         def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
             model_cls.__immaterial_model_config__ = ModelConfig(
@@ -93,7 +93,7 @@ class ImmaterialDecorators:
 #         __immaterial_model_name__ = INTERNAL_MODEL_RECORD_NAME
 #         entity_name: str
 #         entity_schema: dict
-#         indicies: Indices
+#         indicies: IndicesType
 
 #         @classmethod
 #         def gen_id(cls, entity_name: str) -> str:

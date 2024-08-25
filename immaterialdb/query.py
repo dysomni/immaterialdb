@@ -285,6 +285,8 @@ StandardQueryStatement = NamedTuple(
 
 
 class StandardQuery:
+    Statement = StandardQueryStatement
+
     statements: list[StandardQueryStatement]
     consistent_read: bool
 

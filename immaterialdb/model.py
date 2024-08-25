@@ -8,7 +8,8 @@ from mypy_boto3_dynamodb.service_resource import Table
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from immaterialdb.constants import ENCRYPTED_FIELD_PREFIX, LOGGER
-from immaterialdb.errors import FieldMisconfigurationError, transaction_write_error_boundary
+from immaterialdb.error_boundaries import transaction_write_error_boundary
+from immaterialdb.errors import FieldMisconfigurationError
 from immaterialdb.nodes import (
     BaseNode,
     NodeTransactionItem,
@@ -41,19 +42,24 @@ class QueryIndex(BaseModel):
         return self.partition_fields + self.sort_fields
 
 
-Indices = list[UniqueIndex | QueryIndex]
+class Indices:
+    Unique = UniqueIndex
+    Query = QueryIndex
+
+
+IndicesType = list[UniqueIndex | QueryIndex]
 
 
 class ModelConfig:
     root_config: "RootConfig"
-    indices: Indices
+    indices: IndicesType
     encrypted_fields: list[str]
     auto_decrypt: bool
 
     def __init__(
         self,
         root_config: "RootConfig",
-        indices: Indices,
+        indices: IndicesType,
         encrypted_fields: list[str] | None = None,
         auto_decrypt: bool = True,
     ):
