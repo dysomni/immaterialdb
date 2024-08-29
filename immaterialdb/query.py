@@ -53,6 +53,15 @@ class RecordQueryResult(Generic[T]):
         except StopIteration:
             raise IndexError("Index out of range")
 
+    def __len__(self) -> int:
+        while True:
+            try:
+                next(self._parent)
+            except StopIteration:
+                break
+
+        return len(self._parent._flattened_records)
+
 
 class BatchQueryResult(Generic[T]):
     records: RecordQueryResult[T]
