@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from enum import StrEnum, auto
-from typing import Any, Literal, NamedTuple, Self
+from typing import Any, Literal, NamedTuple, Self, Sequence
 
 from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from mypy_boto3_dynamodb.type_defs import AttributeValueTypeDef, TransactWriteItemTypeDef
@@ -70,10 +70,15 @@ class CounterNode(Node):
     node_type: Literal[NodeTypes.counter] = NodeTypes.counter
     counter_node_id: str
     counter_field_name: str
+    count: int = 0
 
     @classmethod
-    def create(cls, entity_name: str, entity_id: str, field_name: str) -> Self:
-        pk = sk = counter_key_prefix(f"{entity_name}_{field_name}_{entity_id}")
+    def key(cls, entity_name: str, entity_id: str, field_name: str) -> str:
+        return counter_key_prefix(f"{entity_name}_{field_name}_{entity_id}")
+
+    @classmethod
+    def create(cls, entity_name: str, entity_id: str, field_name: str, amount: int = 0) -> Self:
+        pk = sk = cls.key(entity_name, entity_id, field_name)
         return cls(
             entity_name=entity_name,
             entity_id=entity_id,
@@ -81,10 +86,29 @@ class CounterNode(Node):
             pk=pk,
             sk=sk,
             counter_node_id=entity_id,
+            count=amount,
         )
 
     def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
-        return {}
+        return {
+            "Put": {
+                "Item": self.for_dynamo(),
+                "TableName": table_name,
+                "ConditionExpression": "attribute_not_exists(pk)",
+            }
+        }
+
+    def assemble_transaction_item_increment(self, table_name: str, amount: int) -> TransactWriteItemTypeDef:
+        return {
+            "Update": {
+                "Key": {"pk": TypeSerializer().serialize(self.pk), "sk": TypeSerializer().serialize(self.sk)},
+                "TableName": table_name,
+                "UpdateExpression": "ADD #count :amount",
+                "ExpressionAttributeNames": {"#count": "count"},
+                "ExpressionAttributeValues": {":amount": TypeSerializer().serialize(amount)},
+                "ConditionExpression": "attribute_exists(pk)",
+            }
+        }
 
 
 class UniqueNode(Node):
@@ -148,4 +172,4 @@ class QueryNode(Node):
 NodeType = BaseNode | UniqueNode | QueryNode | CounterNode
 NodeTypeList = list[NodeType]
 NodeTransactionItem = NamedTuple("NodeTransactionItem", [("node", NodeType), ("action", Literal["put", "delete"])])
-NodeTransactionList = list[NodeTransactionItem]
+NodeTransactionList = Sequence[NodeTransactionItem | TransactWriteItemTypeDef]

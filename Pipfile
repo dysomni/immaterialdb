@@ -13,8 +13,8 @@ moto = "*"
 pytest = "*"
 ipykernel = "*"
 ipython = "*"
-boto3-stubs = {extras = ["dynamodb", "s3", "boto3"], version = "*"}
 freezegun = "*"
+boto3-stubs = {extras = ["s3", "dynamodb", "dynamodbstreams"], version = "==1.35.4"}
 
 [requires]
 python_version = "3.12"

@@ -1,7 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
 from types import NoneType
-from typing import TYPE_CHECKING, ClassVar, Literal, Self, Union
+from typing import TYPE_CHECKING, ClassVar, Literal, Optional, Self, Union
 
 import ulid
 from mypy_boto3_dynamodb import DynamoDBClient
@@ -89,16 +89,17 @@ class ModelConfig:
             field_config = model_cls.model_fields[field]
             if field_config.annotation != int:
                 raise TypeError(f"Counter field {field} must be of type int on model {model_cls}")
-            if field_config.default != 0:
-                raise TypeError(f"Counter field {field} must default to 0 on model {model_cls}")
 
     def _validate_encrypt_fields(self, model_cls: type["Model"]) -> None:
         for field in self.encrypted_fields:
             if not field in model_cls.model_fields:
                 raise TypeError(f"Encrypted field {field} is not a field on model {model_cls}")
             field_config = model_cls.model_fields[field]
-            if field_config.annotation != str or field_config.annotation != Union[str, NoneType]:
-                raise TypeError(f"Encrypted field {field} must be of type str or optional str on model {model_cls}")
+            if field_config.annotation != str and field_config.annotation != Union[str, NoneType]:
+                raise TypeError(
+                    f"Encrypted field {field} must be of type str or optional str on model {model_cls}, "
+                    f"not {field_config.annotation}"
+                )
 
     def _validate_unique_index(self, model_cls: type["Model"], index: UniqueIndex) -> None:
         for field in index.unique_fields:
@@ -161,6 +162,7 @@ class Model(BaseModel):
         return cls.__immaterial_model_name__ or cls.__name__
 
     def save(self):
+        self.sync_counter_fields()
         with self.__immaterial_root_config__.dynamodb_provider.lock(self.id):
             current_nodes = materialize_model(self)
             existing_nodes: NodeTypeList
@@ -171,12 +173,41 @@ class Model(BaseModel):
                 existing_nodes = []
 
             for_deletion = [node for node in existing_nodes if node not in current_nodes]
+            for_put = [
+                node for node in current_nodes if not node.node_type == NodeTypes.counter or node not in existing_nodes
+            ]  # we don't want to overwrite the counter nodes since they are incremented separately
 
             transaction_items = [
-                *[NodeTransactionItem(node, "put") for node in current_nodes],
+                *[NodeTransactionItem(node, "put") for node in for_put],
                 *[NodeTransactionItem(node, "delete") for node in for_deletion],
             ]
             self._write_transaction(transaction_items)
+
+    def increment_counter(self, field_name: str, amount: int = 1) -> int:
+        if not field_name in self.__immaterial_model_config__.counter_fields:
+            raise TypeError(f"Field {field_name} is not a counter field on model {self.immaterial_model_name()}")
+
+        counter_node = CounterNode.create(
+            entity_name=self.immaterial_model_name(),
+            entity_id=self.id,
+            field_name=field_name,
+        )
+        transaction_items = [counter_node.assemble_transaction_item_increment(self._table_name(), amount)]
+        self._write_transaction(transaction_items)
+        self.sync_counter_fields()
+        return getattr(self, field_name)
+
+    def sync_counter_fields(self) -> None:
+        for field in self.__immaterial_model_config__.counter_fields:
+            counter_node = CounterNode.create(
+                entity_name=self.immaterial_model_name(),
+                entity_id=self.id,
+                field_name=field,
+            )
+            response = self._table().get_item(Key={"pk": counter_node.pk, "sk": counter_node.sk}, ConsistentRead=True)
+            item = response.get("Item")
+            if item:
+                setattr(self, field, item["count"])
 
     @classmethod
     def get_by_id(cls, id: str) -> Self | None:
@@ -283,17 +314,28 @@ class Model(BaseModel):
 
     @classmethod
     def _write_transaction(cls, transaction_items: NodeTransactionList):
+        node_transaction_items = [
+            transaction_item
+            for transaction_item in transaction_items
+            if isinstance(transaction_item, NodeTransactionItem)
+        ]
+        raw_transaction_items = [
+            transaction_item
+            for transaction_item in transaction_items
+            if not isinstance(transaction_item, NodeTransactionItem)
+        ]
         items = [
             *[
                 node.assemble_transaction_item_delete(cls._table_name())
-                for node, action in transaction_items
+                for node, action in node_transaction_items
                 if action == "delete"
             ],
             *[
                 node.assemble_transaction_item_put(cls._table_name())
-                for node, action in transaction_items
+                for node, action in node_transaction_items
                 if action == "put"
             ],
+            *raw_transaction_items,
         ]
         LOGGER.info(f"Writing transaction items: {items}")
         with transaction_write_error_boundary(items):
@@ -366,6 +408,7 @@ def materialize_model(model: Model) -> NodeTypeList:
                 entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
                 field_name=field,
+                amount=getattr(model, field),
             )
         )
 

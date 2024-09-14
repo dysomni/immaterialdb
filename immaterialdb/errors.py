@@ -8,3 +8,7 @@ class QueryNotSupportedError(Exception):
 
 class RecordNotUniqueError(Exception):
     pass
+
+
+class CounterNotSavedError(Exception):
+    pass

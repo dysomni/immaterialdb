@@ -3,7 +3,7 @@ from contextlib import contextmanager
 import botocore.exceptions
 from mypy_boto3_dynamodb.type_defs import TransactWriteItemTypeDef
 
-from immaterialdb.errors import RecordNotUniqueError
+from immaterialdb.errors import CounterNotSavedError, RecordNotUniqueError
 from immaterialdb.object_helpers import safe_dot_access
 
 
@@ -24,11 +24,19 @@ def transaction_write_error_boundary(items: list[TransactWriteItemTypeDef]):
                 if (
                     "Code" in reason
                     and reason["Code"] == "ConditionalCheckFailed"
-                    and "Put" in item
-                    and "ConditionExpression" in item["Put"]
-                    and "attribute_not_exists(pk)" in item["Put"]["ConditionExpression"]
+                    and safe_dot_access(item, "Put.ConditionExpression") == "attribute_not_exists(pk)"
+                    and safe_dot_access(item, "Put.Item.unique_node_id.S")
                 ):
                     pk = safe_dot_access(item, "Put.Item.pk.S")
                     raise RecordNotUniqueError(f"Record already exists with unique key {pk}")
+
+                if (
+                    "Code" in reason
+                    and reason["Code"] == "ConditionalCheckFailed"
+                    and safe_dot_access(item, "Update.ConditionExpression") == "attribute_exists(pk)"
+                    and safe_dot_access(item, "Update.UpdateExpression") == "ADD #count :amount"
+                ):
+                    pk = safe_dot_access(item, "Update.Key.pk.S")
+                    raise CounterNotSavedError(f"Record must be saved before incrementing counter {pk}")
 
         raise e
