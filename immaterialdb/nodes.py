@@ -6,6 +6,7 @@ from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from mypy_boto3_dynamodb.type_defs import AttributeValueTypeDef, TransactWriteItemTypeDef
 from pydantic import BaseModel
 
+from immaterialdb.dynamo_provider import counter_key_prefix
 from immaterialdb.types import FieldValue, PrimaryKeys
 from immaterialdb.value_serializers import serialize_for_query_node_primary_key, serialize_for_unique_node_primary_key
 
@@ -14,6 +15,7 @@ class NodeTypes(StrEnum):
     base = auto()
     unique = auto()
     query = auto()
+    counter = auto()
 
 
 class Node(BaseModel, ABC):
@@ -62,6 +64,27 @@ class BaseNode(Node):
                 "TableName": table_name,
             }
         }
+
+
+class CounterNode(Node):
+    node_type: Literal[NodeTypes.counter] = NodeTypes.counter
+    counter_node_id: str
+    counter_field_name: str
+
+    @classmethod
+    def create(cls, entity_name: str, entity_id: str, field_name: str) -> Self:
+        pk = sk = counter_key_prefix(f"{entity_name}_{field_name}_{entity_id}")
+        return cls(
+            entity_name=entity_name,
+            entity_id=entity_id,
+            counter_field_name=field_name,
+            pk=pk,
+            sk=sk,
+            counter_node_id=entity_id,
+        )
+
+    def assemble_transaction_item_put(self, table_name: str) -> TransactWriteItemTypeDef:
+        return {}
 
 
 class UniqueNode(Node):
@@ -122,7 +145,7 @@ class QueryNode(Node):
         }
 
 
-NodeType = BaseNode | UniqueNode | QueryNode
+NodeType = BaseNode | UniqueNode | QueryNode | CounterNode
 NodeTypeList = list[NodeType]
 NodeTransactionItem = NamedTuple("NodeTransactionItem", [("node", NodeType), ("action", Literal["put", "delete"])])
 NodeTransactionList = list[NodeTransactionItem]

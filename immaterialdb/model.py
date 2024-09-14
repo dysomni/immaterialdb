@@ -1,6 +1,7 @@
 import hashlib
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, ClassVar, Literal, Self
+from types import NoneType
+from typing import TYPE_CHECKING, ClassVar, Literal, Self, Union
 
 import ulid
 from mypy_boto3_dynamodb import DynamoDBClient
@@ -12,6 +13,7 @@ from immaterialdb.error_boundaries import transaction_write_error_boundary
 from immaterialdb.errors import FieldMisconfigurationError
 from immaterialdb.nodes import (
     BaseNode,
+    CounterNode,
     NodeTransactionItem,
     NodeTransactionList,
     NodeTypeList,
@@ -55,6 +57,7 @@ class ModelConfig:
     indices: IndicesType
     encrypted_fields: list[str]
     auto_decrypt: bool
+    counter_fields: list[str]
 
     def __init__(
         self,
@@ -62,11 +65,58 @@ class ModelConfig:
         indices: IndicesType,
         encrypted_fields: list[str] | None = None,
         auto_decrypt: bool = True,
+        counter_fields: list[str] | None = None,
     ):
         self.root_config = root_config
         self.indices = indices
         self.encrypted_fields = encrypted_fields or []
         self.auto_decrypt = auto_decrypt
+        self.counter_fields = counter_fields or []
+
+    def validate_config(self, model_cls: type["Model"]) -> None:
+        self._validate_counter_fields(model_cls)
+        self._validate_encrypt_fields(model_cls)
+        for index in self.indices:
+            if isinstance(index, UniqueIndex):
+                self._validate_unique_index(model_cls, index)
+            if isinstance(index, QueryIndex):
+                self._validate_query_index(model_cls, index)
+
+    def _validate_counter_fields(self, model_cls: type["Model"]) -> None:
+        for field in self.counter_fields:
+            if not field in model_cls.model_fields:
+                raise TypeError(f"Counter field {field} is not a field on model {model_cls}")
+            field_config = model_cls.model_fields[field]
+            if field_config.annotation != int:
+                raise TypeError(f"Counter field {field} must be of type int on model {model_cls}")
+            if field_config.default != 0:
+                raise TypeError(f"Counter field {field} must default to 0 on model {model_cls}")
+
+    def _validate_encrypt_fields(self, model_cls: type["Model"]) -> None:
+        for field in self.encrypted_fields:
+            if not field in model_cls.model_fields:
+                raise TypeError(f"Encrypted field {field} is not a field on model {model_cls}")
+            field_config = model_cls.model_fields[field]
+            if field_config.annotation != str or field_config.annotation != Union[str, NoneType]:
+                raise TypeError(f"Encrypted field {field} must be of type str or optional str on model {model_cls}")
+
+    def _validate_unique_index(self, model_cls: type["Model"], index: UniqueIndex) -> None:
+        for field in index.unique_fields:
+            if not field in model_cls.model_fields:
+                raise TypeError(f"Unique index field {field} is not a field on model {model_cls}")
+            if field in self.counter_fields:
+                raise TypeError(f"Unique index field {field} cannot be a counter field on model {model_cls}")
+            if field in self.encrypted_fields:
+                raise TypeError(f"Unique index field {field} cannot be an encrypted field on model {model_cls}")
+
+    def _validate_query_index(self, model_cls: type["Model"], index: QueryIndex) -> None:
+        for field in index.partition_fields + index.sort_fields:
+            if not field in model_cls.model_fields:
+                raise TypeError(f"Query index field {field} is not a field on model {model_cls}")
+            if field in self.counter_fields:
+                raise TypeError(f"Query index field {field} cannot be a counter field on model {model_cls}")
+            if field in self.encrypted_fields:
+                raise TypeError(f"Query index field {field} cannot be an encrypted field on model {model_cls}")
 
 
 class Model(BaseModel):
@@ -309,6 +359,15 @@ def materialize_model(model: Model) -> NodeTypeList:
                 raw_data=model.model_dump_json(),
             )
             nodes.append(index_node)
+
+    for field in model.__immaterial_model_config__.counter_fields:
+        nodes.append(
+            CounterNode.create(
+                entity_name=model.immaterial_model_name(),
+                entity_id=model.id,
+                field_name=field,
+            )
+        )
 
     other_nodes = [PrimaryKey(pk=node.pk, sk=node.sk) for node in nodes]
 

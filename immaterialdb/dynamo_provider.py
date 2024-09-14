@@ -19,6 +19,10 @@ class GsiNames(StrEnum):
     model_scan = auto()
 
 
+def counter_key_prefix(id: str) -> str:
+    return f"immaterial_counter#{id}"
+
+
 class DynamodbConnectionProvider:
     table_name: str
     region: str
@@ -79,7 +83,7 @@ class DynamodbConnectionProvider:
                 LOGGER.warning(f"Failed to release lock for {id}, {e}")
 
     def init_counter(self, id: str):
-        pk = sk = f"immaterial_counter#{id}"
+        pk = sk = counter_key_prefix(id)
         with self.lock(id):
             try:
                 self.table.put_item(
@@ -91,8 +95,17 @@ class DynamodbConnectionProvider:
                 else:
                     raise
 
+    def get_counter(self, id: str) -> int:
+        pk = sk = counter_key_prefix(id)
+        try:
+            response = self.table.get_item(Key={"pk": pk, "sk": sk})
+            return response["Item"]["count"]
+        except KeyError:
+            LOGGER.warning(f"Counter {id} does not exist")
+            return 0
+
     def increment_counter(self, id: str, amount: int = 1):
-        pk = sk = f"immaterial_counter#{id}"
+        pk = sk = counter_key_prefix(id)
         self.table.update_item(
             Key={"pk": pk, "sk": sk},
             UpdateExpression="ADD #count :amount",

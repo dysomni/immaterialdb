@@ -1,8 +1,9 @@
-from typing import Callable, Protocol, Type, TypeVar
+from types import NoneType
+from typing import Callable, Protocol, Type, TypeVar, Union
 
 from immaterialdb.constants import SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
-from immaterialdb.model import IndicesType, Model, ModelConfig, UniqueIndex
+from immaterialdb.model import IndicesType, Model, ModelConfig, QueryIndex, UniqueIndex
 
 
 class RootConfig:
@@ -66,7 +67,11 @@ class ImmaterialDecorators:
         return decorator
 
     def register_model(
-        self, indices: IndicesType | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
+        self,
+        indices: IndicesType | None = None,
+        encrypted_fields: list[str] | None = None,
+        auto_decrypt: bool = True,
+        counter_fields: list[str] | None = None,
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
         # TODO - validate no overlapping indices
         # TODO - auto ordering of indices for best match (prefering sort key over partition key)
@@ -76,7 +81,9 @@ class ImmaterialDecorators:
                 indices=indices or [],
                 encrypted_fields=encrypted_fields,
                 auto_decrypt=auto_decrypt,
+                counter_fields=counter_fields,
             )
+            model_cls.__immaterial_model_config__.validate_config(model_cls)
             model_cls.__immaterial_root_config__ = self.config
             self.config.registered_models[model_cls.immaterial_model_name()] = model_cls
             return model_cls
