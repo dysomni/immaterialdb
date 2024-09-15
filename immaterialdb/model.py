@@ -184,6 +184,13 @@ class Model(BaseModel):
             self._write_transaction(transaction_items)
 
     def increment_counter(self, field_name: str, amount: int = 1) -> int:
+        """The counter is independent of the model and cannot be incremented before the model is saved
+        The initial value of the model field before the first save will be the starting value of the counter.
+        The value of the counter field on the model will not always coincide with the value of the counter.
+        Use the `sync_counter_fields` method to update the model field with the current value of the counter.
+        When saving the model, it will automatically pull the most recent value of the counter and set the field to
+        that value.
+        """
         if not field_name in self.__immaterial_model_config__.counter_fields:
             raise TypeError(f"Field {field_name} is not a counter field on model {self.immaterial_model_name()}")
 
