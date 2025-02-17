@@ -6,6 +6,8 @@ resource "aws_dynamodb_table" "table" {
   hash_key     = "pk"
   range_key    = "sk"
 
+  deletion_protection_enabled = var.delete_protection
+
   attribute {
     name = "pk"
     type = "S"
