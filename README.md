@@ -21,7 +21,7 @@ Add to your `pyproject.toml`:
 ```toml
 [project]
 dependencies = [
-    "immaterialdb @ git+https://github.com/dysomni/immaterialdb.git@v0.1.13",
+    "immaterialdb @ git+https://github.com/dysomni/immaterialdb.git@v0.1.14",
     ...
 ]
 ```
@@ -29,7 +29,7 @@ dependencies = [
 Or install via pip:
 
 ```sh
-pip install "immaterialdb @ git+https://github.com/dysomni/immaterialdb.git@v0.1.13"
+pip install "immaterialdb @ git+https://github.com/dysomni/immaterialdb.git@v0.1.14"
 ```
 
 ---
