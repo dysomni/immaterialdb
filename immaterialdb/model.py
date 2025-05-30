@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, ClassVar, Literal, Self
+from typing import TYPE_CHECKING, Callable, ClassVar, Generic, Literal, Protocol, Self, Type, TypeVar
 
 import ulid
 from mypy_boto3_dynamodb import DynamoDBClient
@@ -116,6 +116,13 @@ class ModelConfig:
         self.auto_decrypt = auto_decrypt
 
 
+SelfType = TypeVar("SelfType", contravariant=True)
+
+
+class SaveHookFuncType(Protocol[SelfType]):
+    def __call__(self, model: SelfType, decrypted_copy: SelfType) -> None: ...
+
+
 class Model(BaseModel):
     """
     Base class for all user-defined models in immaterialdb.
@@ -177,6 +184,8 @@ class Model(BaseModel):
     __immaterial_root_config__: ClassVar["RootConfig"]
     __immaterial_model_config__: ClassVar[ModelConfig]
     __immaterial_model_name__: ClassVar[str | None] = None
+    __immaterial_pre_save_hooks__: ClassVar[list[SaveHookFuncType[Self]]] = []
+    __immaterial_post_save_hooks__: ClassVar[list[SaveHookFuncType[Self]]] = []
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -198,7 +207,7 @@ class Model(BaseModel):
 
         return self
 
-    def fetch_field_values(self, field_list: list[str]) -> list[FieldValue]:
+    def _fetch_field_values(self, field_list: list[str]) -> list[FieldValue]:
         field_values: list[FieldValue] = []
         for field in field_list:
             try:
@@ -214,7 +223,35 @@ class Model(BaseModel):
     def immaterial_model_name(cls) -> str:
         return cls.__immaterial_model_name__ or cls.__name__
 
+    @classmethod
+    def register_pre_save_hook(cls) -> Callable[[SaveHookFuncType[Self]], SaveHookFuncType[Self]]:
+        def decorator(func: SaveHookFuncType[Self]) -> SaveHookFuncType[Self]:
+            cls.__immaterial_pre_save_hooks__.append(func)
+            return func
+
+        return decorator
+
+    @classmethod
+    def register_post_save_hook(cls) -> Callable[[SaveHookFuncType[Self]], SaveHookFuncType[Self]]:
+        def decorator(func: SaveHookFuncType[Self]) -> SaveHookFuncType[Self]:
+            cls.__immaterial_post_save_hooks__.append(func)
+            return func
+
+        return decorator
+
+    def _pre_save(self, decrypted_copy: Self):
+        for hook in self.__immaterial_pre_save_hooks__:
+            hook(self, decrypted_copy)
+
+    def _post_save(self, decrypted_copy: Self):
+        for hook in self.__immaterial_post_save_hooks__:
+            hook(self, decrypted_copy)
+
     def save(self):
+        decrypted_copy = self.model_copy()
+        decrypted_copy.decrypt_fields()
+        self._pre_save(decrypted_copy)
+
         try:
             with self.__immaterial_root_config__.dynamodb_provider.lock(self.id):
                 current_nodes = materialize_model(self)
@@ -231,11 +268,14 @@ class Model(BaseModel):
                     *[NodeTransactionItem(node, "put") for node in current_nodes],
                     *[NodeTransactionItem(node, "delete") for node in for_deletion],
                 ]
+
                 self._write_transaction(transaction_items)
         except LockNotAcquiredError as e:
             raise ConcurrentRecordUpdateError(
                 f"Record {self.id} is being updated by another process. Cannot save."
             ) from e
+
+        self._post_save(decrypted_copy)
 
     @classmethod
     def get_by_id(cls, id: str) -> Self | None:
@@ -402,7 +442,7 @@ def materialize_model(model: Model) -> NodeTypeList:
 
     for index in model.__immaterial_model_config__.indices:
         if index.index_type == "unique":
-            field_values = model.fetch_field_values(index.unique_fields)
+            field_values = model._fetch_field_values(index.unique_fields)
             unique_node = UniqueNode.create(
                 entity_name=model.immaterial_model_name(),
                 entity_id=model.id,
@@ -411,8 +451,8 @@ def materialize_model(model: Model) -> NodeTypeList:
             nodes.append(unique_node)
 
         elif index.index_type == "query":
-            partition_field_values = model.fetch_field_values(index.partition_fields)
-            sort_field_values = model.fetch_field_values(index.sort_fields)
+            partition_field_values = model._fetch_field_values(index.partition_fields)
+            sort_field_values = model._fetch_field_values(index.sort_fields)
             index_node = QueryNode.create(
                 entity_name=model.immaterial_model_name(),
                 entity_id=model.id,

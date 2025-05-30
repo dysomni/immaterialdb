@@ -119,3 +119,27 @@ def test_model_delete():
 
     response = IMMATERIALDB.dynamodb_provider.table.scan()
     assert response["Count"] == 0
+
+
+@mock_immaterialdb(IMMATERIALDB)
+def test_model_register_save_hooks():
+    @IMMATERIALDB.decorators.register_model()
+    class MyModel(Model):
+        name: str
+        age: int
+
+    @MyModel.register_pre_save_hook()
+    def pre_save_hook(model: MyModel, decrypted_copy: MyModel):
+        model.age += 1
+
+    @MyModel.register_post_save_hook()
+    def post_save_hook(model: MyModel, decrypted_copy: MyModel):
+        model.age += 1
+
+    new_model = MyModel(name="John", age=30)
+    new_model.save()
+    assert new_model.age == 32
+
+    saved_model = MyModel.get_by_id(new_model.id)
+    assert saved_model
+    assert saved_model.age == 31
