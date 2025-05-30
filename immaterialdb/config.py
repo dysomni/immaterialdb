@@ -2,7 +2,8 @@ from typing import Callable, Protocol, Type, TypeVar
 
 from immaterialdb.constants import SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
-from immaterialdb.model import IndicesType, Model, ModelConfig, UniqueIndex
+from immaterialdb.errors import ModelMisconfigurationError
+from immaterialdb.model import IndicesType, Model, ModelConfig, QueryIndex, UniqueIndex
 
 
 class RootConfig:
@@ -104,8 +105,8 @@ class ImmaterialDecorators:
     def register_model(
         self, indices: IndicesType | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
-        # TODO - validate no overlapping indices
-        # TODO - auto ordering of indices for best match (prefering sort key over partition key)
+        _validate_indices(indices) if indices else None
+
         def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
             model_cls.__immaterial_model_config__ = ModelConfig(
                 root_config=self.config,
@@ -118,6 +119,34 @@ class ImmaterialDecorators:
             return model_cls
 
         return decorator
+
+
+def _validate_indices(indices: IndicesType):
+    # ensure unique indices arent redundant - eg a unique index of name, age is redundant if there is a unique index of name
+    unique_indices = [index for index in indices if isinstance(index, UniqueIndex)]
+    for unique_index in unique_indices:
+        # find another unique index that is a subset of this one
+        for other_unique_index in unique_indices:
+            if (
+                set(unique_index.unique_fields).issubset(set(other_unique_index.unique_fields))
+                and unique_index.unique_fields != other_unique_index.unique_fields
+            ):
+                raise ModelMisconfigurationError(
+                    f"Unique index {other_unique_index.unique_fields} is redundant to {unique_index.unique_fields} because the latter is a subset of the former"
+                )
+
+    # ensure query indices arent redundant - eg a query with a the same pk and an sk of age is redundant to a query with a sk of age, name
+    query_indices = [index for index in indices if isinstance(index, QueryIndex)]
+    for query_index in query_indices:
+        for other_query_index in query_indices:
+            if (
+                query_index.partition_fields == other_query_index.partition_fields
+                and set(query_index.sort_fields).issubset(set(other_query_index.sort_fields))
+                and query_index.sort_fields != other_query_index.sort_fields
+            ):
+                raise ModelMisconfigurationError(
+                    f"Query index pk {query_index.partition_fields} sk {query_index.sort_fields} is redundant to pk {other_query_index.partition_fields} sk {other_query_index.sort_fields} because the former is a subset of the latter"
+                )
 
 
 # for a later day - the ability for immaterialdb to manage its own internal models for keeping track of usage

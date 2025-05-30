@@ -28,6 +28,7 @@ dev = [
   "ipython",
   "boto3-stubs[dynamodb, s3, boto3]",
   "freezegun",
+  "black>=25.1.0",
 ]
 
 [tool.uv]

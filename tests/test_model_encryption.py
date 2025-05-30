@@ -42,6 +42,20 @@ class MyModel(Model):
     my_secret: Optional[str]
 
 
+@IMMATERIALDB.decorators.register_model(
+    [
+        QueryIndex(partition_fields=["name"], sort_fields=["age"]),
+        UniqueIndex(unique_fields=["name"]),
+    ],
+    encrypted_fields=["my_secret"],
+    auto_decrypt=False,
+)
+class MyModelNoAutoDecrypt(Model):
+    name: str
+    age: int
+    my_secret: Optional[str]
+
+
 @freeze_time("2021-01-01T00:00:00")
 @mock_immaterialdb(IMMATERIALDB)
 def test_encrypts_secrets_automatically():
@@ -159,3 +173,14 @@ def test_encryption_skipped_if_not_string(caplog: pytest.LogCaptureFixture):
 
     assert "Field my_secret is not a string, skipping encryption" in caplog.text
     assert "Field my_secret is not a string, skipping decryption" in caplog.text
+
+
+@freeze_time("2021-01-01T00:00:00")
+@mock_immaterialdb(IMMATERIALDB)
+def test_no_auto_decrypt():
+    new_model = MyModelNoAutoDecrypt(id="temp", name="John", age=30, my_secret="password")
+    new_model.save()
+
+    gotten_model = MyModelNoAutoDecrypt.get_by_id("temp")
+    assert gotten_model is not None
+    assert gotten_model.my_secret == "##encrypted##70617373776f7264"
