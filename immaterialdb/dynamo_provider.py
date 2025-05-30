@@ -1,8 +1,10 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from enum import StrEnum, auto
 from functools import cached_property
 from time import sleep
+from typing import cast
 
 import boto3
 import ulid
@@ -45,14 +47,13 @@ class DynamodbConnectionProvider:
         start_time = now = datetime.now(timezone.utc)
         end_time = start_time + timedelta(seconds=wait)
         expiration_time = now + timedelta(seconds=ttl)
-        lock_value = ulid.new().str
-        pk = f"immaterial_lock#{id}"
+        pk = sk = f"immaterial_lock#{id}"
 
         while now <= end_time:
             try:
                 LOGGER.debug(f"Attempting to acquire lock for {id}")
                 self.table.put_item(
-                    Item={"pk": pk, "sk": lock_value, "expire_time": expiration_time.isoformat()},
+                    Item={"pk": pk, "sk": sk, "expire_time": expiration_time.isoformat()},
                     ConditionExpression="attribute_not_exists(pk) OR expire_time < :now",
                     ExpressionAttributeValues={":now": now.isoformat()},
                 )
@@ -73,33 +74,19 @@ class DynamodbConnectionProvider:
             yield
         finally:
             try:
-                # Release the lock
-                self.table.delete_item(Key={"pk": pk, "sk": lock_value})
+                # Release the lock only if the expiration time is the same as the one we set
+                # This is to prevent race conditions where the lock is released by another process
+                self.table.delete_item(
+                    Key={"pk": pk, "sk": sk},
+                    ConditionExpression="expire_time = :expire_time",
+                    ExpressionAttributeValues={":expire_time": expiration_time.isoformat()},
+                )
                 LOGGER.debug(f"Lock released for {id}")
             except ClientError as e:
                 LOGGER.warning(f"Failed to release lock for {id}, {e}")
 
-    def init_counter(self, id: str):
-        pk = sk = f"immaterial_counter#{id}"
-        with self.lock(id):
-            try:
-                self.table.put_item(
-                    Item={"pk": pk, "sk": sk, "count": 0}, ConditionExpression="attribute_not_exists(pk)"
-                )
-            except ClientError as e:
-                if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
-                    LOGGER.info(f"Counter {id} already exists")
-                else:
-                    raise
-
-    def increment_counter(self, id: str, amount: int = 1):
-        pk = sk = f"immaterial_counter#{id}"
-        self.table.update_item(
-            Key={"pk": pk, "sk": sk},
-            UpdateExpression="ADD #count :amount",
-            ExpressionAttributeNames={"#count": "count"},
-            ExpressionAttributeValues={":amount": amount},
-        )
+    def counter(self, id: str) -> "Counter":
+        return Counter(id, self)
 
     def create_table(self):
         table = self.resource.create_table(
@@ -136,3 +123,54 @@ class DynamodbConnectionProvider:
         )
         table.meta.client.get_waiter("table_exists").wait(TableName=self.table_name)
         LOGGER.info(f"Table {self.table_name} created")
+
+
+class Counter:
+    pk: str
+    sk: str
+    dynamodb_provider: DynamodbConnectionProvider
+
+    def __init__(self, id: str, dynamodb_provider: DynamodbConnectionProvider):
+        self.pk = self.sk = f"immaterial_counter#{id}"
+        self.dynamodb_provider = dynamodb_provider
+
+    def _setup(self, initial_value: int = 0):
+        with self.dynamodb_provider.lock(self.pk):
+            try:
+                self.dynamodb_provider.table.put_item(
+                    Item={"pk": self.pk, "sk": self.sk, "count": initial_value},
+                    ConditionExpression="attribute_not_exists(pk)",
+                )
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                    LOGGER.info(f"Counter {self.pk} already exists")
+                else:
+                    raise
+
+    def increment(self, amount: int = 1) -> int:
+        try:
+            return self._increment_call(amount)
+        except ClientError as e:
+            if e.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                LOGGER.info(f"Counter {self.pk} does not exist, attempting to set it up.")
+                self._setup()
+                return self._increment_call(amount)
+            else:
+                raise
+
+    def _increment_call(self, amount: int = 1) -> int:
+        response = self.dynamodb_provider.table.update_item(
+            Key={"pk": self.pk, "sk": self.sk},
+            UpdateExpression="ADD #count :amount",
+            ExpressionAttributeNames={"#count": "count"},
+            ExpressionAttributeValues={":amount": amount},
+            ReturnValues="UPDATED_NEW",
+            ConditionExpression="attribute_exists(pk)",
+        )
+        return int(cast(Decimal, response["Attributes"]["count"]))
+
+    def get(self) -> int:
+        response = self.dynamodb_provider.table.get_item(Key={"pk": self.pk, "sk": self.sk})
+        if "Item" not in response:
+            return 0
+        return int(cast(Decimal, response["Item"]["count"]))

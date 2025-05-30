@@ -1,4 +1,5 @@
 import hashlib
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, ClassVar, Generic, Literal, Protocol, Self, Type, TypeVar
 
@@ -8,6 +9,7 @@ from mypy_boto3_dynamodb.service_resource import Table
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from immaterialdb.constants import ENCRYPTED_FIELD_PREFIX, LOGGER
+from immaterialdb.dynamo_provider import Counter
 from immaterialdb.error_boundaries import transaction_write_error_boundary
 from immaterialdb.errors import ConcurrentRecordUpdateError, FieldMisconfigurationError, LockNotAcquiredError
 from immaterialdb.nodes import (
@@ -102,6 +104,7 @@ class ModelConfig:
     indices: IndicesType
     encrypted_fields: list[str]
     auto_decrypt: bool
+    counter_fields: list[str]
 
     def __init__(
         self,
@@ -109,11 +112,13 @@ class ModelConfig:
         indices: IndicesType,
         encrypted_fields: list[str] | None = None,
         auto_decrypt: bool = True,
+        counter_fields: list[str] | None = None,
     ):
         self.root_config = root_config
         self.indices = indices
         self.encrypted_fields = encrypted_fields or []
         self.auto_decrypt = auto_decrypt
+        self.counter_fields = counter_fields or []
 
 
 SelfType = TypeVar("SelfType", contravariant=True)
@@ -184,8 +189,8 @@ class Model(BaseModel):
     __immaterial_root_config__: ClassVar["RootConfig"]
     __immaterial_model_config__: ClassVar[ModelConfig]
     __immaterial_model_name__: ClassVar[str | None] = None
-    __immaterial_pre_save_hooks__: ClassVar[list[SaveHookFuncType[Self]]] = []
-    __immaterial_post_save_hooks__: ClassVar[list[SaveHookFuncType[Self]]] = []
+    __immaterial_pre_save_hooks__: ClassVar[list[SaveHookFuncType[Self]] | None] = None
+    __immaterial_post_save_hooks__: ClassVar[list[SaveHookFuncType[Self]] | None] = None
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -226,6 +231,9 @@ class Model(BaseModel):
     @classmethod
     def register_pre_save_hook(cls) -> Callable[[SaveHookFuncType[Self]], SaveHookFuncType[Self]]:
         def decorator(func: SaveHookFuncType[Self]) -> SaveHookFuncType[Self]:
+            if cls.__immaterial_pre_save_hooks__ is None:
+                cls.__immaterial_pre_save_hooks__ = []
+
             cls.__immaterial_pre_save_hooks__.append(func)
             return func
 
@@ -234,23 +242,27 @@ class Model(BaseModel):
     @classmethod
     def register_post_save_hook(cls) -> Callable[[SaveHookFuncType[Self]], SaveHookFuncType[Self]]:
         def decorator(func: SaveHookFuncType[Self]) -> SaveHookFuncType[Self]:
+            if cls.__immaterial_post_save_hooks__ is None:
+                cls.__immaterial_post_save_hooks__ = []
+
             cls.__immaterial_post_save_hooks__.append(func)
             return func
 
         return decorator
 
     def _pre_save(self, decrypted_copy: Self):
-        for hook in self.__immaterial_pre_save_hooks__:
+        for hook in self.__immaterial_pre_save_hooks__ or []:
             hook(self, decrypted_copy)
 
     def _post_save(self, decrypted_copy: Self):
-        for hook in self.__immaterial_post_save_hooks__:
+        for hook in self.__immaterial_post_save_hooks__ or []:
             hook(self, decrypted_copy)
 
     def save(self):
         decrypted_copy = self.model_copy()
         decrypted_copy.decrypt_fields()
         self._pre_save(decrypted_copy)
+        first_save = False
 
         try:
             with self.__immaterial_root_config__.dynamodb_provider.lock(self.id):
@@ -260,6 +272,7 @@ class Model(BaseModel):
                 if existing_base_node:
                     existing_nodes = [existing_base_node, *self._get_other_nodes(existing_base_node)]
                 else:
+                    first_save = True
                     existing_nodes = []
 
                 for_deletion = [node for node in existing_nodes if node not in current_nodes]
@@ -268,6 +281,8 @@ class Model(BaseModel):
                     *[NodeTransactionItem(node, "put") for node in current_nodes],
                     *[NodeTransactionItem(node, "delete") for node in for_deletion],
                 ]
+                if first_save:
+                    self._init_counters()
 
                 self._write_transaction(transaction_items)
         except LockNotAcquiredError as e:
@@ -276,6 +291,27 @@ class Model(BaseModel):
             ) from e
 
         self._post_save(decrypted_copy)
+
+    def _counter_id(self, counter_name: str) -> str:
+        return f"{self.id}:{counter_name}"
+
+    def _init_counters(self):
+        for field_name, value in self._fetch_field_values(self.__immaterial_model_config__.counter_fields):
+            self.__immaterial_root_config__.dynamodb_provider.counter(self._counter_id(field_name))._setup(value)
+
+    def increment_counter(self, field_name: str, amount: int = 1) -> int:
+        if field_name not in self.__immaterial_model_config__.counter_fields:
+            raise ValueError(f"Counter {field_name} is not configured for model {self.immaterial_model_name()}")
+        new_value = self.__immaterial_root_config__.dynamodb_provider.counter(self._counter_id(field_name)).increment(
+            amount
+        )
+        setattr(self, field_name, new_value)
+        return new_value
+
+    def refresh_counters(self):
+        for field_name in self.__immaterial_model_config__.counter_fields:
+            value = self.__immaterial_root_config__.dynamodb_provider.counter(self._counter_id(field_name)).get()
+            setattr(self, field_name, value)
 
     @classmethod
     def get_by_id(cls, id: str) -> Self | None:
@@ -310,6 +346,11 @@ class Model(BaseModel):
 
     def delete(self):
         self.delete_by_id(self.id)
+
+    @contextmanager
+    def record_lock(self, ttl: int = 15, wait: int = 5):
+        with self.__immaterial_root_config__.dynamodb_provider.lock(f"{self.id}:record_lock", ttl, wait):
+            yield
 
     @classmethod
     def delete_by_id(cls, id: str):

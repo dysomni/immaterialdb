@@ -103,16 +103,22 @@ class ImmaterialDecorators:
         return decorator
 
     def register_model(
-        self, indices: IndicesType | None = None, encrypted_fields: list[str] | None = None, auto_decrypt: bool = True
+        self,
+        indices: IndicesType | None = None,
+        encrypted_fields: list[str] | None = None,
+        auto_decrypt: bool = True,
+        counter_fields: list[str] | None = None,
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
         _validate_indices(indices) if indices else None
 
         def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
+            # TODO: validate field names are on model
             model_cls.__immaterial_model_config__ = ModelConfig(
                 root_config=self.config,
                 indices=indices or [],
                 encrypted_fields=encrypted_fields,
                 auto_decrypt=auto_decrypt,
+                counter_fields=counter_fields,
             )
             model_cls.__immaterial_root_config__ = self.config
             self.config.registered_models[model_cls.immaterial_model_name()] = model_cls
