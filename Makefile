@@ -1,2 +1,2 @@
 repl:
-	pipenv run ipython
+	uv run ipython
