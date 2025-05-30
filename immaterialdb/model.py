@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from immaterialdb.constants import ENCRYPTED_FIELD_PREFIX, LOGGER
 from immaterialdb.error_boundaries import transaction_write_error_boundary
-from immaterialdb.errors import FieldMisconfigurationError
+from immaterialdb.errors import ConcurrentRecordUpdateError, FieldMisconfigurationError, LockNotAcquiredError
 from immaterialdb.nodes import (
     BaseNode,
     NodeTransactionItem,
@@ -215,22 +215,27 @@ class Model(BaseModel):
         return cls.__immaterial_model_name__ or cls.__name__
 
     def save(self):
-        with self.__immaterial_root_config__.dynamodb_provider.lock(self.id):
-            current_nodes = materialize_model(self)
-            existing_nodes: NodeTypeList
-            existing_base_node = self._get_base_node(self.id)
-            if existing_base_node:
-                existing_nodes = [existing_base_node, *self._get_other_nodes(existing_base_node)]
-            else:
-                existing_nodes = []
+        try:
+            with self.__immaterial_root_config__.dynamodb_provider.lock(self.id):
+                current_nodes = materialize_model(self)
+                existing_nodes: NodeTypeList
+                existing_base_node = self._get_base_node(self.id)
+                if existing_base_node:
+                    existing_nodes = [existing_base_node, *self._get_other_nodes(existing_base_node)]
+                else:
+                    existing_nodes = []
 
-            for_deletion = [node for node in existing_nodes if node not in current_nodes]
+                for_deletion = [node for node in existing_nodes if node not in current_nodes]
 
-            transaction_items = [
-                *[NodeTransactionItem(node, "put") for node in current_nodes],
-                *[NodeTransactionItem(node, "delete") for node in for_deletion],
-            ]
-            self._write_transaction(transaction_items)
+                transaction_items = [
+                    *[NodeTransactionItem(node, "put") for node in current_nodes],
+                    *[NodeTransactionItem(node, "delete") for node in for_deletion],
+                ]
+                self._write_transaction(transaction_items)
+        except LockNotAcquiredError as e:
+            raise ConcurrentRecordUpdateError(
+                f"Record {self.id} is being updated by another process. Cannot save."
+            ) from e
 
     @classmethod
     def get_by_id(cls, id: str) -> Self | None:
@@ -268,17 +273,20 @@ class Model(BaseModel):
 
     @classmethod
     def delete_by_id(cls, id: str):
-        with cls.__immaterial_root_config__.dynamodb_provider.lock(id):
-            base_node = cls._get_base_node(id)
-            if not base_node:
-                return
+        try:
+            with cls.__immaterial_root_config__.dynamodb_provider.lock(id):
+                base_node = cls._get_base_node(id)
+                if not base_node:
+                    return
 
-            other_nodes = cls._get_other_nodes(base_node)
-            transaction_items = [
-                NodeTransactionItem(base_node, "delete"),
-                *[NodeTransactionItem(node, "delete") for node in other_nodes],
-            ]
-            cls._write_transaction(transaction_items)
+                other_nodes = cls._get_other_nodes(base_node)
+                transaction_items = [
+                    NodeTransactionItem(base_node, "delete"),
+                    *[NodeTransactionItem(node, "delete") for node in other_nodes],
+                ]
+                cls._write_transaction(transaction_items)
+        except LockNotAcquiredError as e:
+            raise ConcurrentRecordUpdateError(f"Record {id} is being updated by another process. Cannot delete.") from e
 
     def encrypt_fields(self):
         for field in self.__immaterial_model_config__.encrypted_fields:

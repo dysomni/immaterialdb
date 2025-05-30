@@ -12,6 +12,7 @@ from mypy_boto3_dynamodb.client import DynamoDBClient
 from mypy_boto3_dynamodb.service_resource import Table
 
 from immaterialdb.constants import LOGGER
+from immaterialdb.errors import LockNotAcquiredError
 
 
 class GsiNames(StrEnum):
@@ -66,7 +67,7 @@ class DynamodbConnectionProvider:
                     raise
         else:
             LOGGER.error(f"Failed to acquire lock for {id}")
-            raise Exception(f"Lock is already held for key {id}")
+            raise LockNotAcquiredError(f"Lock is already held for key {id}")
 
         try:
             yield
