@@ -49,13 +49,14 @@ class Reindexer(ABC):
                     batch_size=batch_size,
                 ).model_dump_json()
             )
+        self.enqueue(payloads)
 
     @abstractmethod
-    def enqueuer(self, payloads: list[str]): ...
+    def enqueue(self, payloads: list[str]): ...
 
-    def processor(self, payloads: list[str]):
+    def process(self, payloads: list[str]):
         for payload in payloads:
-            command = Command.model_validate_json(payload)
+            command = Command.model_validate_json(payload).root
             if isinstance(command, QueueForModel):
                 self.process_queue_for_model(command)
             elif isinstance(command, ReindexEntity):
@@ -103,7 +104,4 @@ class Reindexer(ABC):
                 ).model_dump_json()
             )
 
-        self.enqueuer(new_commands)
-
-    def notify(self):
-        raise NotImplementedError("Notify method not implemented.")
+        self.enqueue(new_commands)
