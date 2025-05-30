@@ -14,4 +14,9 @@ bump/minor:
 bump/major:
 	python3 scripts/bump_version.py major
 
+test:
+	uv run pytest tests
 
+test/coverage:
+	uv run pytest tests --cov=immaterialdb
+	uv run coverage report -m
