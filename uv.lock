@@ -303,7 +303,7 @@ wheels = [
 
 [[package]]
 name = "immaterialdb"
-version = "0.1.6"
+version = "0.1.10"
 source = { virtual = "." }
 dependencies = [
     { name = "boto3" },
