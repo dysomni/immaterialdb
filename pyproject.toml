@@ -1,6 +1,6 @@
 [project]
 name = "immaterialdb"
-version = "0.1.12"
+version = "0.1.13"
 description = "A materialized graph based dynamodb client"
 authors = [{ name = "James Brock", email = "contact@dysomni.com" }]
 license = "MIT"
