@@ -6,7 +6,13 @@ authors = [{ name = "James Brock", email = "contact@dysomni.com" }]
 license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = ["boto3", "pydantic", "ulid-py", "moto", "boto3-stubs[dynamodb]"]
+dependencies = [
+  "boto3",
+  "pydantic>=2,<3",
+  "ulid-py",
+  "moto>=5,<6",
+  "boto3-stubs[dynamodb]",
+]
 
 [tool.setuptools.packages.find]
 include = ["immaterialdb*"]
@@ -16,7 +22,7 @@ line-length = 120
 
 [dependency-groups]
 dev = [
-  "moto",
+  "moto>=5,<6",
   "pytest",
   "ipykernel",
   "ipython",
