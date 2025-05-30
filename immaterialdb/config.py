@@ -6,6 +6,42 @@ from immaterialdb.model import IndicesType, Model, ModelConfig, UniqueIndex
 
 
 class RootConfig:
+    """
+    The root configuration object for an immaterialdb application.
+
+    RootConfig manages the global settings, DynamoDB connection, and model registration for an immaterialdb instance. It acts as the entry point for configuring your database, registering models and indices, and setting up encryption/decryption for sensitive fields.
+
+    Attributes:
+        table_name (str):
+            The name of the DynamoDB table used for storage.
+        registered_models (dict[str, Type[Model]]):
+            A mapping of model names to their registered model classes.
+        dynamodb_provider (DynamodbConnectionProvider):
+            The provider for DynamoDB connections and table management.
+
+    Methods:
+        decorators (ImmaterialDecorators):
+            Provides decorators for registering models, encryption, and decryption functions.
+
+    Example:
+        >>> from immaterialdb import RootConfig, Indices, Model
+        >>> db = RootConfig("my_table")
+        >>> @db.decorators.register_model([
+        ...     Indices.Unique(unique_fields=["email"]),
+        ...     Indices.Query(partition_fields=["email"], sort_fields=["created_at"])
+        ... ])
+        ... class User(Model):
+        ...     email: str
+        ...     created_at: str
+        >>> # Optionally, register encryption/decryption
+        >>> @db.decorators.register_encryption
+        ... def encrypt_string(text: str) -> str:
+        ...     return text[::-1]  # Example only!
+        >>> @db.decorators.register_decryption
+        ... def decrypt_string(text: str) -> str:
+        ...     return text[::-1]
+    """
+
     table_name: str
     registered_models: dict[str, Type[Model]]
     dynamodb_provider: DynamodbConnectionProvider

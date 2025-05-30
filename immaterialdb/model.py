@@ -28,11 +28,50 @@ if TYPE_CHECKING:
 
 
 class UniqueIndex(BaseModel):
+    """
+    Represents a unique index on a model.
+
+    This index ensures that all records in the model are unique based on the specified fields.
+
+    Attributes:
+        index_type (Literal["unique"]): The type of index, always "unique".
+        unique_fields (list[str]): The fields that must be unique across all records.
+
+    Example:
+        >>> from immaterialdb import Indices
+        >>> indices = [Indices.Unique(unique_fields=["name", "age"])]
+    """
+
     index_type: Literal["unique"] = "unique"
     unique_fields: list[str]
 
 
 class QueryIndex(BaseModel):
+    """
+    Represents a queryable index on a model, defining how records can be efficiently queried using partition and sort keys.
+
+    QueryIndex specifies a set of fields that together form a DynamoDB index for efficient querying. The partition_fields define the primary grouping (partition key), while sort_fields allow for range queries and ordering within each partition. This structure enables complex queries, such as filtering by one or more fields and sorting or paginating results.
+
+    QueryIndex is used by the query planner to match user queries (e.g., StandardQuery) to the most appropriate index, ensuring that queries are executed efficiently and in accordance with DynamoDB's indexing rules. It is also used during model materialization to create the necessary index nodes for each record.
+
+    Attributes:
+        index_type (Literal["query"]): The type of index, always "query" for this class.
+        partition_fields (list[str]): The fields that make up the partition (hash) key for the index.
+        sort_fields (list[str]): The fields that make up the sort (range) key for the index.
+
+    Properties:
+        all_fields (list[str]): Returns the concatenation of partition_fields and sort_fields, representing the full index key order.
+
+    Example:
+        >>> from immaterialdb import Indices
+        >>> indices = [
+        ...     Indices.Query(partition_fields=["name"], sort_fields=["age"]),
+        ... ]
+        >>> # This allows queries like:
+        >>> # - All records with a given name, sorted by age
+        >>> # - All records sorted by creation time
+    """
+
     index_type: Literal["query"] = "query"
     partition_fields: list[str]
     sort_fields: list[str]
@@ -43,6 +82,14 @@ class QueryIndex(BaseModel):
 
 
 class Indices:
+    """
+    A helper class for constructing indices. Includes aliases for the different index types for convenience.
+
+    Example:
+        >>> from immaterialdb import Indices
+        >>> indices = [Indices.Unique(unique_fields=["name", "age"])]
+    """
+
     Unique = UniqueIndex
     Query = QueryIndex
 
@@ -70,6 +117,63 @@ class ModelConfig:
 
 
 class Model(BaseModel):
+    """
+    Base class for all user-defined models in immaterialdb.
+
+    Inherit from this class to define your application's data models. The Model class provides built-in support for DynamoDB-backed storage, automatic ULID-based IDs, timestamp management, and integration with immaterialdb's indexing, encryption, and query system.
+
+    Included Attributes:
+        id (str):
+            The unique identifier for the record (ULID by default).
+        created_at (datetime):
+            The UTC timestamp when the record was created.
+        updated_at (datetime):
+            The UTC timestamp when the record was last updated.
+        updated_hash (str | None):
+            A hash of the record's data for change detection.
+
+    Class Attributes:
+        __immaterial_root_config__ (RootConfig):
+            The root configuration for the database (set automatically).
+        __immaterial_model_config__ (ModelConfig):
+            The model's configuration, including indices and encryption settings.
+        __immaterial_model_name__ (str | None):
+            The name used for the model in the database (defaults to class name).
+
+    Methods:
+        save():
+            Save or update the record in the database.
+        get_by_id(id):
+            Retrieve a record by its ID.
+        query(...):
+            Query records using StandardQuery, KeyConditionQuery, or AllQuery.
+        delete():
+            Delete the record from the database.
+        delete_by_id(id):
+            Delete a record by its ID.
+        encrypt_fields():
+            Encrypt all configured fields before saving.
+        decrypt_fields():
+            Decrypt all configured fields after loading.
+
+    Example:
+        >>> from immaterialdb import RootConfig, Indices, Model
+        >>> db = RootConfig("my_table")
+        >>> @db.decorators.register_model([
+        ...     Indices.Unique(unique_fields=["email"]),
+        ...     Indices.Query(partition_fields=["email"], sort_fields=["created_at"])
+        ... ])
+        ... class User(Model):
+        ...     email: str
+        ...     created_at: str
+        >>> user = User(email="alice@example.com", created_at="2024-06-30T12:00:00Z")
+        >>> user.save()
+        >>> fetched = User.get_by_id(user.id)
+        >>> assert fetched.email == "alice@example.com"
+        >>> for record in User.query(Queries.All()).records:
+        ...     print(record)
+    """
+
     __immaterial_root_config__: ClassVar["RootConfig"]
     __immaterial_model_config__: ClassVar[ModelConfig]
     __immaterial_model_name__: ClassVar[str | None] = None

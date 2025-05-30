@@ -64,6 +64,48 @@ class RecordQueryResult(Generic[T]):
 
 
 class BatchQueryResult(Generic[T]):
+    """
+    Represents the result of a batched query over a model, supporting efficient iteration and pagination.
+
+    This class manages the retrieval of query results from DynamoDB in batches, handling pagination transparently. It provides both batch-wise and record-wise iteration, supports lazy loading (fetching data only as needed), and can enforce a maximum number of records to retrieve.
+
+    Attributes:
+        records (RecordQueryResult[T]):
+            An iterable over all records in the query result, supporting random access and length queries.
+        last_evaluated_key (LastEvaluatedKey | None):
+            The DynamoDB key for continuing the query (for pagination), or None if all results have been fetched.
+        more_to_query (bool):
+            Whether there are more results to fetch from DynamoDB.
+        querier (Querier):
+            The underlying Querier object used to fetch batches.
+
+    Iteration:
+        - Iterating over the BatchQueryResult yields batches (lists) of records.
+        - The .records attribute provides an iterable over individual records, supporting random access and len().
+        - Use .next_batch() to manually fetch the next batch.
+
+    Example:
+        >>> results = MyModel.query(Queries.Standard([
+        ...     Queries.Standard.Statement("age", "eq", 21)
+        ... ]), max_records=100)
+        >>> for batch in results:
+        ...     for record in batch:
+        ...         print(record)
+        >>> # Or iterate over all records directly:
+        >>> for record in results.records:
+        ...     print(record)
+        >>> # Paginate using last_evaluated_key:
+        >>> if results.last_evaluated_key:
+        ...     more_results = MyModel.query(
+        ...         Queries.Standard([...]),
+        ...         last_evaluated_key=results.last_evaluated_key
+        ...     )
+
+    See Also:
+        - RecordQueryResult: for record-wise iteration and access.
+        - StandardQuery, KeyConditionQuery, AllQuery: for different query types.
+    """
+
     records: RecordQueryResult[T]
     last_evaluated_key: LastEvaluatedKey | None
     more_to_query: bool
@@ -294,6 +336,34 @@ StandardQueryStatement = NamedTuple(
 
 
 class StandardQuery:
+    """
+    Represents a standard query for retrieving records from a model using indexed fields.
+
+    This class is used to construct queries that map to a model's defined query indices. Each query consists of a list of statements, where each statement specifies a field, an operation, and a value. The operations supported are 'eq', 'gt', 'lt', 'gte', 'lte', and 'begins_with'.
+
+    Constraints:
+        - All statements except the last must use the 'eq' operation.
+        - The fields and order of statements must match a defined query index on the model.
+        - If all fields are indexed in the partition key, the last operation must be 'eq'.
+        - The query is translated into a DynamoDB key condition expression.
+
+    Parameters:
+        statements (list[StandardQueryStatement]):
+            A list of query statements, each specifying a field, operation, and value.
+        consistent_read (bool, optional):
+            Whether to use strongly consistent reads. Defaults to True.
+
+    Example:
+        >>> from immaterialdb import Queries
+        >>> query = Queries.Standard([
+        ...     Queries.Standard.Statement("age", "eq", 21),
+        ...     Queries.Standard.Statement("name", "begins_with", "John")
+        ... ])
+        >>> results = MyModel.query(query)
+        >>> for record in results.records:
+        ...     print(record)
+    """
+
     Statement = StandardQueryStatement
 
     statements: list[StandardQueryStatement]
@@ -309,6 +379,18 @@ class StandardQuery:
 
 
 class KeyConditionQuery:
+    """
+    Represents a key condition query for retrieving records from a model using boto3's condition expressions.
+
+    The key condition classes can be imported from boto3.dynamodb.conditions.
+
+    Example:
+        >>> from boto3.dynamodb.conditions import Key
+        >>> key_condition = Key('pk').eq(hash_value) & Key('sk').eq(range_key_value)
+        >>> query = Queries.KeyCondition(key_condition, gsi_name=None, consistent_read=True)
+        >>> results = MyModel.query(query)
+    """
+
     key_condition: ConditionBaseImportTypeDef
     consistent_read: bool
     gsi_name: str | None
@@ -322,6 +404,13 @@ class KeyConditionQuery:
 
 
 class AllQuery:
+    """
+    Represents a query that retrieves all records from a model.
+
+    Example:
+        >>> results = MyModel.query(Queries.All())
+    """
+
     pass
 
 
@@ -329,6 +418,20 @@ QueryTypes = StandardQuery | KeyConditionQuery | AllQuery
 
 
 class Queries:
+    """
+    A helper class for constructing queries. Includes aliases for the different query types for convenience.
+
+    Example:
+        >>> from immaterialdb import Queries
+        >>> query = Queries.Standard([
+        ...     Queries.Standard.Statement("age", "eq", 21),
+        ...     Queries.Standard.Statement("name", "begins_with", "John")
+        ... ])
+        >>> results = MyModel.query(query)
+        >>> for record in results.records:
+        ...     print(record)
+    """
+
     Standard = StandardQuery
     KeyCondition = KeyConditionQuery
     All = AllQuery

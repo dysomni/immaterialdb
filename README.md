@@ -34,6 +34,67 @@ pip install "immaterialdb @ git+https://github.com/dysomni/immaterialdb.git@v0.1
 
 ---
 
+## DynamoDB Table Setup
+
+immaterialdb requires a DynamoDB table with a specific schema and set of global secondary indexes (GSIs). You can provision this table using the provided Terraform module, or manually via the AWS Console/CLI.
+
+### Using Terraform
+
+A Terraform module is provided in `immaterialtf/` to create the required table and IAM policy. Example usage:
+
+```hcl
+module "immaterialdb_table" {
+  source            = "./immaterialtf"
+  table_name        = "my_table"
+  delete_protection = true # or false
+  tags = {
+    Environment = "dev"
+    Project     = "immaterialdb"
+  }
+}
+```
+
+This will create a DynamoDB table with the following attributes and GSIs:
+
+- **Primary Key**: `pk` (string, HASH), `sk` (string, RANGE)
+- **Attributes**: `entity_id` (string), `entity_name` (string), `base_node_id` (string)
+- **GSI 1**: `ids_only` — HASH: `entity_id`, projection: ALL
+- **GSI 2**: `model_scan` — HASH: `entity_name`, RANGE: `base_node_id`, projection: ALL
+
+Outputs:
+
+- `table_name`: The name of the table
+- `table_arn`: The ARN of the table
+- `iam_policy_arn`: The ARN of the IAM policy for DynamoDB access
+
+### Manual Setup (AWS Console/CLI)
+
+If not using Terraform, create a DynamoDB table with:
+
+- **Table name**: (your choice, e.g. `my_table`)
+- **Partition key**: `pk` (String)
+- **Sort key**: `sk` (String)
+
+Add the following attributes (all type String):
+
+- `entity_id`
+- `entity_name`
+- `base_node_id`
+
+Add these Global Secondary Indexes:
+
+1. **ids_only**
+   - Partition key: `entity_id` (String)
+   - Projection: ALL
+2. **model_scan**
+   - Partition key: `entity_name` (String)
+   - Sort key: `base_node_id` (String)
+   - Projection: ALL
+
+Make sure your application has IAM permissions for: `dynamodb:PutItem`, `dynamodb:GetItem`, `dynamodb:UpdateItem`, `dynamodb:DeleteItem`, `dynamodb:Query`, and `dynamodb:Scan` on the table.
+
+---
+
 ## Quickstart
 
 ### 1. Setup
