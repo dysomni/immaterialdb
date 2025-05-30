@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 if len(sys.argv) != 2 or sys.argv[1] not in {"patch", "minor", "major"}:
     print("Usage: bump_version.py [patch|minor|major]")
+    sys.exit(1)
+
+# Check for uncommitted changes
+status = subprocess.run(["git", "status", "--porcelain"], capture_output=True, text=True)
+if status.stdout.strip():
+    print("Error: You have uncommitted changes. Please commit or stash them before bumping the version.")
     sys.exit(1)
 
 bump_type = sys.argv[1]
@@ -48,4 +55,9 @@ readme_pattern = r"(immaterialdb @ git\+https://github.com/dysomni/immaterialdb.
 readme_new_content = re.sub(readme_pattern, f"\\1v{new_version}", readme_content)
 readme.write_text(readme_new_content)
 
-print(f"Bumped {bump_type} version to {new_version}")
+# Commit the changes
+commit_msg = f"Bump {bump_type} version to {new_version}"
+subprocess.run(["git", "add", str(pyproject), str(readme)], check=True)
+subprocess.run(["git", "commit", "-m", commit_msg], check=True)
+
+print(f"Bumped {bump_type} version to {new_version} and committed changes.")
