@@ -38,4 +38,14 @@ def replace_version(m):
 
 new_content = re.sub(r'^(version = ")\d+\.\d+\.\d+(".*)$', replace_version, content, flags=re.MULTILINE)
 pyproject.write_text(new_content)
+
+# Update README.md version strings
+readme = Path(__file__).parent.parent / "README.md"
+readme_content = readme.read_text()
+
+# Pattern to match the version in the README.md install strings
+readme_pattern = r"(immaterialdb @ git\+https://github.com/dysomni/immaterialdb.git@)v\d+\.\d+\.\d+"
+readme_new_content = re.sub(readme_pattern, f"\\1v{new_version}", readme_content)
+readme.write_text(readme_new_content)
+
 print(f"Bumped {bump_type} version to {new_version}")
