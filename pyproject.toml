@@ -1,2 +1,34 @@
+[project]
+name = "immaterialdb"
+version = "0.1.6"
+description = "A materialized graph based dynamodb client"
+authors = [{ name = "James Brock", email = "contact@dysomni.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["boto3", "pydantic", "ulid-py", "moto", "boto3-stubs[dynamodb]"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
 [tool.black]
 line-length = 120
+
+[dependency-groups]
+dev = [
+  "moto",
+  "pytest",
+  "ipykernel",
+  "ipython",
+  "boto3-stubs[dynamodb, s3, boto3]",
+  "freezegun",
+]
+
+[tool.uv]
+package = false
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
