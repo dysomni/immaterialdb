@@ -233,6 +233,49 @@ record.increment_counter("age", -1)     # age is now 41
 
 ---
 
+## Distributed Locking
+
+immaterialdb provides distributed locking primitives to help you safely coordinate updates to records or arbitrary resources across multiple processes or machines.
+
+### Record Locks
+
+Each model instance provides a `record_lock` context manager. This ensures that only one process/thread can update a record at a time, preventing race conditions and concurrent modifications.
+
+- **Usage:**
+
+  ```python
+  with record.record_lock(ttl=10, wait=2):
+      # Safe to update this record here
+      record.age += 1
+      record.save()
+  ```
+
+  - `ttl`: How long (in seconds) the lock is held before it expires (default: 15).
+  - `wait`: How long (in seconds) to wait for the lock before raising an error (default: 5).
+  - If the lock cannot be acquired within `wait` seconds, a `LockNotAcquiredError` is raised.
+
+### Manual Locks (Arbitrary Keys)
+
+You can also acquire a distributed lock on any arbitrary key using the DynamoDB provider directly. This is useful for custom critical sections, distributed tasks, or coordination outside of model records.
+
+- **Usage:**
+  ```python
+  with IMMATERIALDB.dynamodb_provider.lock("my-custom-lock", ttl=10, wait=2):
+      # critical section
+      do_something()
+  ```
+  - The semantics are the same as `record_lock`.
+  - The lock key can be any string.
+
+### Implementation Notes
+
+- Locks are implemented using DynamoDB items with a special key and an expiration time.
+- If a lock is already held and not expired, attempts to acquire will retry until `wait` seconds elapse.
+- If the lock cannot be acquired, a `LockNotAcquiredError` is raised.
+- Locks are released when the context exits, but will also expire after `ttl` seconds as a safety net.
+
+---
+
 ## Testing Example
 
 ```python
