@@ -3,7 +3,7 @@ from typing import Callable, Protocol, Type, TypeVar
 from immaterialdb.constants import SEPERATOR
 from immaterialdb.dynamo_provider import DynamodbConnectionProvider
 from immaterialdb.errors import ModelMisconfigurationError
-from immaterialdb.model import IndicesType, Model, ModelConfig, QueryIndex, UniqueIndex
+from immaterialdb.model import IndicesType, Model, ModelConfig, QueryIndex, UniqueIndex, validate_model_class_fields
 
 
 class RootConfig:
@@ -108,20 +108,22 @@ class ImmaterialDecorators:
         encrypted_fields: list[str] | None = None,
         auto_decrypt: bool = True,
         counter_fields: list[str] | None = None,
+        ttl_field: str | None = None,
     ) -> Callable[[Type[ModelType]], Type[ModelType]]:
         _validate_indices(indices) if indices else None
 
         def decorator(model_cls: Type[ModelType]) -> Type[ModelType]:
-            # TODO: validate field names are on model
             model_cls.__immaterial_model_config__ = ModelConfig(
                 root_config=self.config,
                 indices=indices or [],
                 encrypted_fields=encrypted_fields,
                 auto_decrypt=auto_decrypt,
                 counter_fields=counter_fields,
+                ttl_field=ttl_field,
             )
             model_cls.__immaterial_root_config__ = self.config
             self.config.registered_models[model_cls.immaterial_model_name()] = model_cls
+            validate_model_class_fields(model_cls)
             return model_cls
 
         return decorator

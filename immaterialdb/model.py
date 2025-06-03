@@ -105,6 +105,7 @@ class ModelConfig:
     encrypted_fields: list[str]
     auto_decrypt: bool
     counter_fields: list[str]
+    ttl_field: str | None
 
     def __init__(
         self,
@@ -113,12 +114,14 @@ class ModelConfig:
         encrypted_fields: list[str] | None = None,
         auto_decrypt: bool = True,
         counter_fields: list[str] | None = None,
+        ttl_field: str | None = None,
     ):
         self.root_config = root_config
         self.indices = indices
         self.encrypted_fields = encrypted_fields or []
         self.auto_decrypt = auto_decrypt
         self.counter_fields = counter_fields or []
+        self.ttl_field = ttl_field
 
 
 SelfType = TypeVar("SelfType", contravariant=True)
@@ -381,11 +384,6 @@ class Model(BaseModel):
 
     def encrypt_fields(self):
         for field in self.__immaterial_model_config__.encrypted_fields:
-            if not hasattr(self, field):
-                raise FieldMisconfigurationError(
-                    f"Field for encryption {field} is not present in the model {self.immaterial_model_name()}"
-                )
-
             value = getattr(self, field)
             if not isinstance(value, str):
                 LOGGER.debug(f"Field {field} is not a string, skipping encryption")
@@ -399,11 +397,6 @@ class Model(BaseModel):
 
     def decrypt_fields(self):
         for field in self.__immaterial_model_config__.encrypted_fields:
-            if not hasattr(self, field):
-                raise FieldMisconfigurationError(
-                    f"Field for decryption {field} is not present in the model {self.immaterial_model_name()}"
-                )
-
             value = getattr(self, field)
             if not isinstance(value, str):
                 LOGGER.debug(f"Field {field} is not a string, skipping decryption")
@@ -528,3 +521,68 @@ def materialize_model(model: Model) -> NodeTypeList:
     )
 
     return nodes
+
+
+def _validate_ttl_field(model_cls: Type[Model]):
+    if model_cls.__immaterial_model_config__.ttl_field:
+        if model_cls.__immaterial_model_config__.ttl_field not in model_cls.model_fields:
+            raise ValueError(
+                f"TTL field {model_cls.__immaterial_model_config__.ttl_field} is not present in "
+                f"the model {model_cls.immaterial_model_name()}"
+            )
+
+        # must be an integer or optional integer
+        field = model_cls.model_fields[model_cls.__immaterial_model_config__.ttl_field]
+        if field.annotation != int | None and field.annotation != int:
+            raise ValueError(
+                f"TTL field {model_cls.__immaterial_model_config__.ttl_field} must be an integer or nullable "
+                f"integer, not {field.annotation}"
+            )
+
+
+def _validate_counter_fields(model_cls: Type[Model]):
+    for field_name in model_cls.__immaterial_model_config__.counter_fields:
+        if field_name not in model_cls.model_fields:
+            raise ValueError(
+                f"Counter field {field_name} is not present in the model {model_cls.immaterial_model_name()}"
+            )
+        field = model_cls.model_fields[field_name]
+        if field.annotation != int:
+            raise ValueError(f"Counter field {field_name} must be an integer, not {field.annotation}")
+
+
+def _validate_encrypted_fields(model_cls: Type[Model]):
+    for field_name in model_cls.__immaterial_model_config__.encrypted_fields:
+        if field_name not in model_cls.model_fields:
+            raise ValueError(
+                f"Encrypted field {field_name} is not present in the model {model_cls.immaterial_model_name()}"
+            )
+
+        field = model_cls.model_fields[field_name]
+        if field.annotation != str and field.annotation != str | None:
+            raise ValueError(
+                f"Encrypted field {field_name} must be a string or nullable string, not {field.annotation}"
+            )
+
+
+def _validate_index_fields(model_cls: Type[Model]):
+    for index in model_cls.__immaterial_model_config__.indices:
+        if index.index_type == "unique":
+            for field in index.unique_fields:
+                if field not in model_cls.model_fields:
+                    raise ValueError(
+                        f"Unique index field {field} is not present in the model {model_cls.immaterial_model_name()}"
+                    )
+        elif index.index_type == "query":
+            for field in index.partition_fields + index.sort_fields:
+                if field not in model_cls.model_fields:
+                    raise ValueError(
+                        f"Query index field {field} is not present in the model {model_cls.immaterial_model_name()}"
+                    )
+
+
+def validate_model_class_fields(model_cls: Type[Model]):
+    _validate_ttl_field(model_cls)
+    _validate_counter_fields(model_cls)
+    _validate_encrypted_fields(model_cls)
+    _validate_index_fields(model_cls)
