@@ -132,7 +132,7 @@ class Model(BaseModel):
     """
     Base class for all user-defined models in immaterialdb.
 
-    Inherit from this class to define your application's data models. The Model class provides built-in support for DynamoDB-backed storage, automatic ULID-based IDs, timestamp management, and integration with immaterialdb's indexing, encryption, and query system.
+    Inherit from this class to define your application's data models. The Model class provides built-in support for DynamoDB-backed storage, automatic ULID-based IDs, timestamp management, and integration with immaterialdb's indexing, encryption, counter, and query system.
 
     Included Attributes:
         id (str):
@@ -143,6 +143,16 @@ class Model(BaseModel):
             The UTC timestamp when the record was last updated.
         updated_hash (str | None):
             A hash of the record's data for change detection.
+
+    Counter Support:
+        You can declare integer fields as counters by passing `counter_fields=["field_name"]` to the model registration.
+        Counter fields are backed by atomic, distributed counters in DynamoDB and support concurrent increments/decrements.
+
+        Methods:
+            increment_counter(field_name: str, amount: int = 1) -> int
+                Atomically increments (or decrements) the counter and updates the model instance. Returns the new value.
+            refresh_counters()
+                Fetches the latest counter values from DynamoDB and updates the model instance.
 
     Class Attributes:
         __immaterial_root_config__ (RootConfig):

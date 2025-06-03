@@ -175,6 +175,64 @@ user.delete()
 
 ---
 
+## Counters
+
+immaterialdb supports atomic, distributed counters for integer fields on your models. These are useful for fields like view counts, likes, or any value that needs to be incremented/decremented safely across concurrent processes.
+
+### Declaring a Counter Field
+
+Add the `counter_fields` argument to your model registration:
+
+```python
+@IMMATERIALDB.decorators.register_model(counter_fields=["age"])
+class MyModelWithCounter(Model):
+    age: int
+```
+
+### Using Counters
+
+- **Increment/Decrement:**
+  ```python
+  record.increment_counter("age")         # age is now incremented by 1
+  record.increment_counter("age", 10)     # age is incremented by 10
+  record.increment_counter("age", -1)     # age is decremented by 1
+  ```
+- **Refresh from DB:**
+
+  ```python
+  record.refresh_counters()               # Syncs local value with DynamoDB
+  ```
+
+- **Atomicity:**
+  All counter operations are atomic and safe for concurrent use across processes.
+
+### Example
+
+```python
+record = MyModelWithCounter(age=30)
+record.save()
+
+record.increment_counter("age")         # age is now 31
+record.increment_counter("age", 10)     # age is now 41
+
+# In another process/thread:
+other = MyModelWithCounter.get_by_id(record.id)
+other.increment_counter("age")          # age is now 42
+
+# Sync local value with DB
+record.refresh_counters()               # record.age is now 42
+
+# Decrement
+record.increment_counter("age", -1)     # age is now 41
+```
+
+### API
+
+- `increment_counter(field_name: str, amount: int = 1) -> int`: Atomically increments (or decrements) the counter and updates the model instance. Returns the new value.
+- `refresh_counters()`: Fetches the latest counter values from DynamoDB and updates the model instance.
+
+---
+
 ## Testing Example
 
 ```python
