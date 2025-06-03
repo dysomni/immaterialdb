@@ -11,7 +11,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from immaterialdb.constants import ENCRYPTED_FIELD_PREFIX, LOGGER
 from immaterialdb.dynamo_provider import Counter
 from immaterialdb.error_boundaries import transaction_write_error_boundary
-from immaterialdb.errors import ConcurrentRecordUpdateError, FieldMisconfigurationError, LockNotAcquiredError
+from immaterialdb.errors import (
+    ConcurrentRecordUpdateError,
+    FieldMisconfigurationError,
+    LockNotAcquiredError,
+    ModelMisconfigurationError,
+)
 from immaterialdb.nodes import (
     BaseNode,
     NodeTransactionItem,
@@ -526,7 +531,7 @@ def materialize_model(model: Model) -> NodeTypeList:
 def _validate_ttl_field(model_cls: Type[Model]):
     if model_cls.__immaterial_model_config__.ttl_field:
         if model_cls.__immaterial_model_config__.ttl_field not in model_cls.model_fields:
-            raise ValueError(
+            raise ModelMisconfigurationError(
                 f"TTL field {model_cls.__immaterial_model_config__.ttl_field} is not present in "
                 f"the model {model_cls.immaterial_model_name()}"
             )
@@ -534,34 +539,38 @@ def _validate_ttl_field(model_cls: Type[Model]):
         # must be an integer or optional integer
         field = model_cls.model_fields[model_cls.__immaterial_model_config__.ttl_field]
         if field.annotation != int | None and field.annotation != int:
-            raise ValueError(
+            raise ModelMisconfigurationError(
                 f"TTL field {model_cls.__immaterial_model_config__.ttl_field} must be an integer or nullable "
-                f"integer, not {field.annotation}"
+                f"integer, not {field.annotation} for model {model_cls.immaterial_model_name()}"
             )
 
 
 def _validate_counter_fields(model_cls: Type[Model]):
     for field_name in model_cls.__immaterial_model_config__.counter_fields:
         if field_name not in model_cls.model_fields:
-            raise ValueError(
+            raise ModelMisconfigurationError(
                 f"Counter field {field_name} is not present in the model {model_cls.immaterial_model_name()}"
             )
         field = model_cls.model_fields[field_name]
         if field.annotation != int:
-            raise ValueError(f"Counter field {field_name} must be an integer, not {field.annotation}")
+            raise ModelMisconfigurationError(
+                f"Counter field {field_name} must be an integer, not {field.annotation} for "
+                f"model {model_cls.immaterial_model_name()}"
+            )
 
 
 def _validate_encrypted_fields(model_cls: Type[Model]):
     for field_name in model_cls.__immaterial_model_config__.encrypted_fields:
         if field_name not in model_cls.model_fields:
-            raise ValueError(
+            raise ModelMisconfigurationError(
                 f"Encrypted field {field_name} is not present in the model {model_cls.immaterial_model_name()}"
             )
 
         field = model_cls.model_fields[field_name]
         if field.annotation != str and field.annotation != str | None:
-            raise ValueError(
-                f"Encrypted field {field_name} must be a string or nullable string, not {field.annotation}"
+            raise ModelMisconfigurationError(
+                f"Encrypted field {field_name} must be a string or nullable string, not {field.annotation} for "
+                f"model {model_cls.immaterial_model_name()}"
             )
 
 
@@ -570,13 +579,13 @@ def _validate_index_fields(model_cls: Type[Model]):
         if index.index_type == "unique":
             for field in index.unique_fields:
                 if field not in model_cls.model_fields:
-                    raise ValueError(
+                    raise ModelMisconfigurationError(
                         f"Unique index field {field} is not present in the model {model_cls.immaterial_model_name()}"
                     )
         elif index.index_type == "query":
             for field in index.partition_fields + index.sort_fields:
                 if field not in model_cls.model_fields:
-                    raise ValueError(
+                    raise ModelMisconfigurationError(
                         f"Query index field {field} is not present in the model {model_cls.immaterial_model_name()}"
                     )
 
