@@ -172,6 +172,8 @@ user.delete()
 - **Custom Indices**: Define multiple indices for flexible access patterns.
 - **Testing Utilities**: Use `@mock_immaterialdb(IMMATERIALDB)` to mock DynamoDB in your tests.
 - **Field-level Encryption**: Specify `encrypted_fields` and register your own encryption/decryption logic.
+- **Counters**: Add atomic, distributed counters to your models for safe concurrent increments/decrements. See the Counters section below.
+- **Distributed Locking**: Use `record_lock` on models or manual locks via `IMMATERIALDB.dynamodb_provider.lock` for safe, distributed critical sections and to prevent race conditions. See the Distributed Locking section below.
 
 ---
 
